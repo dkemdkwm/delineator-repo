@@ -1,0 +1,17 @@
+# ── core geospatial + numerics ────────────────────────────────────────────────
+geopandas~=0.13.2       # still compatible with Shapely 2 :contentReference[oaicite:0]{index=0}
+shapely~=2.0.2
+pandas~=2.1.3
+numpy~=1.26.2
+pyproj~=3.6.1
+pysheds~=0.3.5
+sigfig~=1.3.3
+
+# ── plotting / templating ─────────────────────────────────────────────────────
+matplotlib~=3.8.1
+Jinja2~=3.1.2
+
+# ── **new** Streamlit UI stack ───────────────────────────────────────────────
+streamlit~=1.46.1       # latest stable (Jun 2025) :contentReference[oaicite:1]{index=1}
+streamlit-folium~=0.25.0  # bridges Folium ↔ Streamlit (Apr 2025) :contentReference[oaicite:2]{index=2}
+folium~=0.20.0            # Leaflet wrapper itself (Jun 2025) :contentReference[oaicite:3]{index=3}
