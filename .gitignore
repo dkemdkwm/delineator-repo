@@ -5,7 +5,6 @@ py/__pycache__/
 __pycache__
 map/*
 plots/*
-pkl/*
 data/*
 __pycache__
 *.pyc
