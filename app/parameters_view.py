@@ -1,3 +1,6 @@
+from pathlib import Path
+
+
 def render():
     import streamlit as st
     import geopandas as gpd
@@ -6,15 +9,16 @@ def render():
     st.set_page_config(page_title="Parámetros Morfométricos", layout="wide")
     st.title("📊 Visualización de parámetros morfométricos")
 
-    st.markdown("""
-    Aquí podrás visualizar, analizar y comparar parámetros como:
-    - Área de la cuenca
-    - Longitud del cauce principal
-    - Pendiente media
-    - Coeficientes de forma y compacidad
-    - Índices de bifurcación
-    - ¡Y más!
-    """)
+    if not (st.session_state.get("gpkg_path") and Path(st.session_state["gpkg_path"]).exists()):
+        st.markdown("""
+        Aquí podrás visualizar, analizar y comparar parámetros como:
+        - Área de la cuenca
+        - Longitud del cauce principal
+        - Pendiente media
+        - Coeficientes de forma y compacidad
+        - Índices de bifurcación
+        - ¡Y más!
+        """)
 
     if "morpho" not in st.session_state:
         st.info("🔍 Delimita una cuenca para ver sus parámetros.")
