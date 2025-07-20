@@ -174,7 +174,7 @@ def render():
             h_norm_plot = np.zeros_like(y_vals)
 
         tabla_para_mostrar = tabla_base
-
+    st.session_state["hypsometric_table"] = tabla_para_mostrar
     # ---------------- Gráfico ----------------
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.plot(x_vals, y_vals, linewidth=2, color="steelblue")
