@@ -1,4 +1,3 @@
-# download_utils.py
 from pathlib import Path
 import io, zipfile, math, base64
 import pandas as pd
@@ -22,37 +21,39 @@ def _pick_excel_engine():
 # ==========================================================
 def _normalize_tc_df(tc_df: pd.DataFrame | None) -> pd.DataFrame | None:
     """
-    Si la tabla de tiempos es una sola fila (cada método en una columna),
-    la convierte a dos columnas: Método | Tiempo (min).
+    Si la tabla viene como una sola fila (métodos en columnas),
+    retorna un DataFrame 'Método' | 'Tiempo (min)'.
+    Si ya está larga, la deja igual.
     """
     if tc_df is None or tc_df.empty:
         return tc_df
-    if tc_df.shape[0] == 1:  # pivot
+    if tc_df.shape[0] == 1:  # ancho (pivot)
         row = tc_df.iloc[0]
         return pd.DataFrame({"Método": row.index, "Tiempo (min)": row.values})
+    # Si ya tiene columna método (en cualquiera de sus variantes)
     cols_low = [c.lower() for c in tc_df.columns]
     if "método" in cols_low or "metodo" in cols_low:
         return tc_df
-    return tc_df
+    return tc_df  # Se asume ya es usable
 
 # ==========================================================
 # Asegurar columna normalizada hipsométrica
 # ==========================================================
 def _ensure_hypso_normalized(hypso_df: pd.DataFrame | None) -> pd.DataFrame | None:
     """
-    Añade la columna 'Elevación normalizada (h/H)' si no existe.
-    Usa la columna de altura media para normalizar.
+    Añade 'Elevación normalizada (h/H)' si no existe.
+    Se normaliza usando la columna de altura media de clase.
     """
     if hypso_df is None or hypso_df.empty:
         return hypso_df
-    # ¿Ya existe?
+    # Ya existe alguna forma de normalizada
     for c in hypso_df.columns:
         lc = c.lower()
         if "normalizada" in lc or "h/h" in lc:
             return hypso_df
-    # Buscar columna de altura media
     altura_col = next(
-        (c for c in hypso_df.columns if "altura media" in c.lower() and "(m)" in c.lower()),
+        (c for c in hypso_df.columns
+         if "altura media" in c.lower() and "(m" in c.lower()),
         None
     )
     if altura_col is None:
@@ -72,14 +73,14 @@ def _ensure_hypso_normalized(hypso_df: pd.DataFrame | None) -> pd.DataFrame | No
 # ==========================================================
 def clip_dem(watershed_gpkg_path: str, dem_path: str) -> Tuple[bytes | None, dict]:
     """
-    Recorta el DEM a la geometría de la cuenca (primera capa) y devuelve:
-      (bytes_geotiff, stats_dict)  o  (None, {"clip_error": ...})
+    Recorta el DEM a la geometría de la cuenca y devuelve
+    (bytes_geotiff, stats_dict) o (None, {"clip_error": ...}).
     """
     try:
         import rasterio
         from rasterio.mask import mask
-        import numpy as np
         from rasterio.crs import CRS
+        import numpy as np
 
         if not Path(watershed_gpkg_path).exists():
             return None, {"clip_error": "GPKG no existe"}
@@ -95,7 +96,7 @@ def clip_dem(watershed_gpkg_path: str, dem_path: str) -> Tuple[bytes | None, dic
 
             if ws.crs is None:
                 ws = ws.set_crs(dem_crs)
-            if ws.crs != dem_crs:
+            elif ws.crs != dem_crs:
                 ws = ws.to_crs(dem_crs)
 
             geoms = [g for g in ws.geometry if g and not g.is_empty]
@@ -104,7 +105,6 @@ def clip_dem(watershed_gpkg_path: str, dem_path: str) -> Tuple[bytes | None, dic
 
             out_arr, out_transform = mask(src, geoms, crop=True)
             band = out_arr[0].astype("float32")
-
             nodata = src.nodata
             if nodata is not None:
                 band[band == nodata] = float("nan")
@@ -131,6 +131,7 @@ def clip_dem(watershed_gpkg_path: str, dem_path: str) -> Tuple[bytes | None, dic
                 "res_y": abs(out_transform.e)
             }
 
+            # Guardar clip en memoria
             mem = io.BytesIO()
             profile = src.profile.copy()
             profile.update({
@@ -141,11 +142,11 @@ def clip_dem(watershed_gpkg_path: str, dem_path: str) -> Tuple[bytes | None, dic
             })
             if nodata is not None:
                 profile["nodata"] = nodata
-
             with rasterio.open(mem, "w", **profile) as dst:
                 dst.write(out_arr)
             mem.seek(0)
 
+            # Área si CRS proyectado
             try:
                 if dem_crs and not dem_crs.is_geographic:
                     pixel_area = abs(out_transform.a) * abs(out_transform.e)
@@ -175,14 +176,16 @@ def build_excel_bytes(
     base64_chunk_len: int = 30000,
     add_hypso_chart: bool = True,
     add_tc_chart: bool = True,
-    add_hypso_image: bool = False,
-    add_tc_image: bool = False
+    add_hypso_image: bool = False,  # (gancho futuro)
+    add_tc_image: bool = False      # (gancho futuro)
 ) -> bytes:
     """
-    Excel con hojas:
-      Parametros, Tiempos_Concentracion, Curva_Hipsometrica,
-      Geometria_Metadatos, DEM_Clip (+ opcional DEM_Clip_B64),
-      y charts nativos para hipso y tiempos.
+    Genera un Excel con:
+      - Parametros
+      - Tiempos_Concentracion (+ chart)
+      - Curva_Hipsometrica (+ chart + columna normalizada)
+      - Geometria_Metadatos
+      - DEM_Clip (+ DEM_Clip_B64 opcional)
     """
     engine = _pick_excel_engine()
     if engine is None:
@@ -193,10 +196,8 @@ def build_excel_bytes(
     if embed_dem_clip and watershed_gpkg_path and dem_path:
         dem_clip_bytes, dem_clip_stats = clip_dem(watershed_gpkg_path, dem_path)
 
-    # Normalizar tiempos
+    # Normalizar tiempos y asegurar normalización hipso
     tc_df_norm = _normalize_tc_df(tc_df)
-
-    # Asegurar columna normalizada hipso
     hypso_df = _ensure_hypso_normalized(hypso_df)
 
     output = io.BytesIO()
@@ -207,21 +208,21 @@ def build_excel_bytes(
             dfp = morpho_df.copy()
             if dfp.shape[1] == 2 and list(dfp.columns) != ["Parámetro", "Valor"]:
                 dfp.columns = ["Parámetro", "Valor"]
-            dfp.sort_values(dfp.columns[0]).to_excel(writer, sheet_name="Parametros", index=False)
+            dfp.sort_values(dfp.columns[0]).to_excel(writer, "Parametros", index=False)
         elif morpho_dict:
             pd.DataFrame(
                 {"Parámetro": list(morpho_dict.keys()), "Valor": list(morpho_dict.values())}
-            ).sort_values("Parámetro").to_excel(writer, sheet_name="Parametros", index=False)
+            ).sort_values("Parámetro").to_excel(writer, "Parametros", index=False)
 
-        # Tiempos
+        # Tiempos de Concentración
         have_tc = tc_df_norm is not None and not tc_df_norm.empty
         if have_tc:
-            tc_df_norm.to_excel(writer, sheet_name="Tiempos_Concentracion", index=False)
+            tc_df_norm.to_excel(writer, "Tiempos_Concentracion", index=False)
 
-        # Hipso
+        # Curva Hipsométrica
         have_hypso = hypso_df is not None and not hypso_df.empty
         if have_hypso:
-            hypso_df.to_excel(writer, sheet_name="Curva_Hipsometrica", index=False)
+            hypso_df.to_excel(writer, "Curva_Hipsometrica", index=False)
 
         # Geometría / Metadatos
         meta_rows = []
@@ -250,7 +251,7 @@ def build_excel_bytes(
                 meta_rows.append({})
             meta_rows[0]["dem_file"] = Path(dem_path).name
         if meta_rows:
-            pd.DataFrame(meta_rows).to_excel(writer, sheet_name="Geometria_Metadatos", index=False)
+            pd.DataFrame(meta_rows).to_excel(writer, "Geometria_Metadatos", index=False)
 
         # DEM Clip
         if embed_dem_clip and (dem_clip_bytes or dem_clip_stats):
@@ -265,20 +266,17 @@ def build_excel_bytes(
             stats_row = {rename_map.get(k, k): v for k, v in dem_clip_stats.items()}
             if dem_clip_bytes:
                 stats_row["clip_bytes"] = len(dem_clip_bytes)
-            pd.DataFrame([stats_row]).to_excel(writer, sheet_name="DEM_Clip", index=False)
+            pd.DataFrame([stats_row]).to_excel(writer, "DEM_Clip", index=False)
 
             if dem_clip_bytes and embed_dem_base64:
                 b64 = base64.b64encode(dem_clip_bytes).decode("ascii")
                 if engine == "xlsxwriter":
                     ws = writer.book.add_worksheet("DEM_Clip_B64")
                     ws.write_row(0, 0, ["Descripcion", "Valor"])
-                    ws.write(1, 0, "total_length")
-                    ws.write(1, 1, len(b64))
-                    ws.write(2, 0, "chunk_len")
-                    ws.write(2, 1, base64_chunk_len)
+                    ws.write(1, 0, "total_length"); ws.write(1, 1, len(b64))
+                    ws.write(2, 0, "chunk_len");    ws.write(2, 1, base64_chunk_len)
                     n_chunks = math.ceil(len(b64) / base64_chunk_len)
-                    ws.write(3, 0, "num_chunks")
-                    ws.write(3, 1, n_chunks)
+                    ws.write(3, 0, "num_chunks");   ws.write(3, 1, n_chunks)
                     ws.write_row(5, 0, ["chunk_index", "b64_data"])
                     r = 6
                     for i in range(n_chunks):
@@ -292,11 +290,13 @@ def build_excel_bytes(
                     pd.DataFrame([{
                         "b64_truncated": trunc,
                         "full_length": len(b64)
-                    }]).to_excel(writer, sheet_name="DEM_Clip_B64", index=False)
+                    }]).to_excel(writer, "DEM_Clip_B64", index=False)
 
-        # Charts (xlsxwriter)
+        # --------------------------------------------------
+        # Charts (solo xlsxwriter)
+        # --------------------------------------------------
         if engine == "xlsxwriter":
-            # Hipso chart
+            # Curva hipsométrica
             if have_hypso and add_hypso_chart:
                 sheet = writer.sheets["Curva_Hipsometrica"]
                 cols = hypso_df.columns.tolist()
@@ -345,10 +345,11 @@ def build_excel_bytes(
                     insert_col = max(len(cols) + 1, 8)
                     sheet.insert_chart(1, insert_col, chart)
 
-            # Tiempos chart
+            # Tiempos de concentración
             if have_tc and add_tc_chart:
                 sheet = writer.sheets["Tiempos_Concentracion"]
-                if list(tc_df_norm.columns) == ["Método", "Tiempo (min)"]:
+                # Buscamos columnas exactamente normalizadas
+                if list(tc_df_norm.columns[:2]) == ["Método", "Tiempo (min)"]:
                     n = len(tc_df_norm)
                     chart = writer.book.add_chart({"type": "column"})
                     chart.add_series({
@@ -369,13 +370,7 @@ def build_excel_bytes(
 # ==========================================================
 # Shapefile ZIP
 # ==========================================================
-def build_watershed_shapefile_zip(
-    gpkg_path: str,
-    layers: Optional[List[str]] = None
-) -> bytes:
-    """
-    Exporta capas seleccionadas del GeoPackage a un ZIP con 1 shapefile por capa.
-    """
+def build_watershed_shapefile_zip(gpkg_path: str, layers: Optional[List[str]] = None) -> bytes:
     import tempfile
     if not gpkg_path or not Path(gpkg_path).exists():
         raise FileNotFoundError("GeoPackage no encontrado.")
@@ -411,9 +406,6 @@ def build_watershed_shapefile_zip(
 # DEM (descarga directa o empaquetado FLT+HDR)
 # ==========================================================
 def package_dem_if_needed(dem_path: str) -> tuple[bytes, str]:
-    """
-    Si el DEM es .flt se empaqueta junto a .hdr. Devuelve (bytes, nombre).
-    """
     p = Path(dem_path)
     if not p.exists():
         raise FileNotFoundError("DEM no encontrado.")
