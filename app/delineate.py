@@ -1,7 +1,11 @@
 import streamlit as st
 from streamlit_folium import st_folium
 import folium
-from folium import TileLayer
+from folium import TileLayer, Tooltip
+from geopandas import gpd
+import pandas as pd
+from shapely.geometry import Point
+from folium import CustomIcon
 
 def render():
     if "last_click" not in st.session_state:
@@ -62,6 +66,16 @@ def render():
     folium.LatLngPopup().add_to(m)
 
     # Marker for selected point
+    # if st.session_state["last_click"]:
+    #     folium.Marker(
+    #         location=[
+    #             st.session_state["last_click"]["lat"],
+    #             st.session_state["last_click"]["lng"]
+    #         ],
+    #         tooltip="Punto seleccionado",
+    #         icon=folium.Icon(color="green", icon="map-pin", prefix="fa")
+    #     ).add_to(m)
+    # Add marker for selected point
     if st.session_state["last_click"]:
         folium.Marker(
             location=[
@@ -71,6 +85,78 @@ def render():
             tooltip="Punto seleccionado",
             icon=folium.Icon(color="green", icon="map-pin", prefix="fa")
         ).add_to(m)
+
+    # Load and render shapefile (only nearby features)
+    shapefile_path = "data/shp/cne_ideam/CNE_IDEAM.shp"
+    try:
+        gdf_cne = gpd.read_file(shapefile_path)
+
+        # Ensure CRS is defined and correct
+        if gdf_cne.crs is None:
+            gdf_cne.set_crs("EPSG:4326", inplace=True)
+        elif gdf_cne.crs.to_string() != "EPSG:4326":
+            gdf_cne = gdf_cne.to_crs("EPSG:4326")
+
+        # Convert columns to string to avoid serialization issues
+        for col in gdf_cne.columns:
+            if pd.api.types.is_object_dtype(gdf_cne[col]) or pd.api.types.is_datetime64_any_dtype(gdf_cne[col]):
+                gdf_cne[col] = gdf_cne[col].astype(str)
+
+        # Filter by proximity if point is selected
+        if st.session_state["last_click"]:
+            click_point = Point(
+                st.session_state["last_click"]["lng"],
+                st.session_state["last_click"]["lat"]
+            )
+
+            buffer_radius_degrees = 0.15  # ~1km radius at equator (adjust if needed)
+            point_buffer = click_point.buffer(buffer_radius_degrees)
+            gdf_filtered = gdf_cne[gdf_cne.geometry.intersects(point_buffer)]
+            icon_url = "app/cloudSunIcon.png"
+            if not gdf_filtered.empty:
+                # folium.GeoJson(
+                #     data=gdf_filtered.__geo_interface__,
+                #     name="CNE IDEAM (filtrado)",
+                #     style_function=lambda feature: {
+                #         "fillColor": "#3388ff",
+                #         "color": "#2255aa",
+                #         "weight": 2,
+                #         "fillOpacity": 0.3,
+                #     },
+                #     tooltip=folium.GeoJsonTooltip(
+                #         fields=["NOMBRE", "CODIGO"] if "NOMBRE" in gdf_filtered.columns and "CODIGO" in gdf_filtered.columns
+                #         else gdf_filtered.columns[:2].tolist()
+                #     )
+                # ).add_to(m)
+                st.session_state["estaciones_filtradas"] = gdf_filtered.to_dict("records")
+                for _, row in gdf_filtered.iterrows():
+                    geom = row.geometry
+                    if geom.geom_type == "Point":
+                        # Try alternate keys if NOMBRE or CODIGO are not exact
+                        nombre = str(row.get("NOMBRE") or row.get("Nombre") or row.get("nombre") or "").strip()
+                        codigo = str(row.get("CODIGO") or row.get("Codigo") or row.get("codigo") or "").strip()
+                        tooltip_html = f"""
+                        <b>NOMBRE:</b> {nombre}<br>
+                        <b>CODIGO:</b> {codigo}
+                        """
+                        folium.Marker(
+                            location=[geom.y, geom.x],
+                            icon=CustomIcon(
+                                icon_image=icon_url,
+                                icon_size=(60, 60),
+                                icon_anchor=(20, 20)
+                            ),
+                            tooltip=Tooltip(tooltip_html)
+                        ).add_to(m)
+            else:
+                st.warning("⚠️ No se encontraron entidades CNE_IDEAM cercanas al punto seleccionado.")
+        else:
+            # Show bounding box only when no point is selected
+            bounds = gdf_cne.total_bounds
+            m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+
+    except Exception as e:
+        st.warning(f"⚠️ No se pudo procesar el shapefile CNE_IDEAM: {e}")
 
     # Add overlays
     if st.session_state.get("show_watershed") and "geojson" in st.session_state:
@@ -115,9 +201,18 @@ def render():
 
     # Layer control: right and initially invisible
     folium.LayerControl(position="topright", collapsed=True).add_to(m)
-
+    if not st.session_state.get("geojson"):
+        st.markdown(
+            """
+            <div class="title-map">
+                Selecciona un punto en el mapa para delimitar una cuenca hidrográfica 🗺️
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
     # Map render
-    result = st_folium(m, height=600, width="100%")
+    result = st_folium(m, width="100%", returned_objects=["last_clicked"], use_container_width=True)
+
 
     if result["last_clicked"]:
         st.session_state["last_click"] = result["last_clicked"]
@@ -125,6 +220,12 @@ def render():
     # Inject CSS for hover-only visibility
     st.markdown("""
         <style>
+        .title-map {
+            font-weight: 400;
+            font-size: 15px;
+            margin-bottom: 10px;
+        }
+
         /* Hide control completely */
         .leaflet-top.leaflet-right {
             opacity: 0;
@@ -149,6 +250,37 @@ def render():
 
         .leaflet-top.leaflet-right:hover .leaflet-control-layers-toggle {
             display: block !important;
+        }
+
+        iframe[title="streamlit_folium"] {
+            height: calc(100vh - 130px) !important;
+            min-height: 500px !important;
+            max-height: calc(100vh - 130px) !important;
+            width: 100% !important;
+            border: none !important;
+            display: block;
+        }
+
+        .element-container:has(iframe[title="streamlit_folium"]) {
+            margin-bottom: 0px !important;
+            padding-bottom: 0px !important;
+            height: calc(100vh - 130px) !important;
+        }
+
+        div[data-testid="stVerticalBlock"] > div {
+            margin-bottom: 0px !important;
+            padding-bottom: 0px !important;
+        }
+
+        .block-container {
+            padding-bottom: 0px !important;
+            margin-bottom: 3rem !important;
+        }
+        .stApp iframe {
+            display: block;
+        }
+        div[data-testid="stVerticalBlock"] {
+            background-color: transparent !important;
         }
         </style>
     """, unsafe_allow_html=True)

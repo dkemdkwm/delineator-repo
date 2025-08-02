@@ -21,8 +21,8 @@ DEM_SEARCH_FOLDERS = [
     "data/raster"
 ]
 EXCLUDE_TOKENS = ("accum", "flowdir", "flow_dir", "hand", "slope", "dir", "fac")
-ASSUMED_RASTER_EPSG = 4326          # MERIT DEM (cuando falta CRS)
-REVERSE_NORMALIZED_FOR_TOP = False  # False => la línea punteada coincide en forma con la azul
+ASSUMED_RASTER_EPSG = 4326
+REVERSE_NORMALIZED_FOR_TOP = False
 
 # ============================================================
 # HELPERS CRS / ÁREA DE PÍXEL
@@ -33,7 +33,6 @@ def _ensure_gdf_crs(gdf: gpd.GeoDataFrame, epsg=ASSUMED_RASTER_EPSG):
     return gdf
 
 def _approx_pixel_area_m2(transform, lat_center_deg: float):
-    """Aproxima área de píxel si el DEM está en grados."""
     m_per_deg_lat = 111320.0
     m_per_deg_lon = 111320.0 * cos(radians(lat_center_deg))
     pw_deg = abs(transform.a)
@@ -60,8 +59,8 @@ def render():
     gdf = _ensure_gdf_crs(gdf)
 
     # ---------------- DEM selection ----------------
-    debug = st.sidebar.checkbox("Mostrar DEBUG DEM", value=False)
-    forced_dem = st.sidebar.text_input("Forzar DEM (ruta opcional)", value="", help="Dejar vacío para autoselección.")
+    debug = False
+    forced_dem = ""
     dem_path = None
 
     existing = st.session_state.get("dem_path")
@@ -88,21 +87,10 @@ def render():
         st.success(f"✅ DEM usado: `{os.path.basename(dem_path)}`")
 
     # ---------------- Parámetros UI ----------------
-    esquema = st.sidebar.selectbox(
-        "Esquema de clases",
-        ("arcgis (100 m)", "intervalos iguales", "cuantiles"),
-        help="ArcGIS: primer tramo hasta ...99 y luego pasos de 100 m."
-    )
-    num_clases = st.sidebar.number_input(
-        "Número de clases (para 'intervalos iguales' o 'cuantiles')",
-        min_value=5, max_value=50, value=12, step=1
-    )
-    orientacion = st.sidebar.selectbox(
-        "Orientación de curva",
-        ("Área desde abajo", "Área desde arriba (ArcGIS)"),
-        help="% acumulado ascendiendo (abajo) o remanente (arriba)."
-    )
-    mostrar_normalizada = st.sidebar.checkbox("Añadir curva normalizada h/H", True)
+    esquema = "arcgis (100 m)"
+    num_clases = 12
+    orientacion = "Área desde arriba (ArcGIS)"
+    mostrar_normalizada = True
 
     # ---------------- Cargar elevaciones ----------------
     elev, transform, src_crs = _load_and_clip_dem(gdf, dem_path)
@@ -113,9 +101,14 @@ def render():
     z_min_real = float(np.nanmin(elev))
     z_max_real = float(np.nanmax(elev))
 
-    if debug:
-        st.write(f"**[DEBUG] Elevación min/max:** {z_min_real} / {z_max_real}")
-        st.write(f"**[DEBUG] CRS DEM:** {src_crs}")
+    # ---------------- Pendiente media (%) ----------------
+    st.sidebar.markdown("---")
+    L_value = 5000.0
+    if L_value > 0:
+        pendiente_media = ((z_max_real - z_min_real) / L_value) * 100
+        st.info(f"📐 **Pendiente media**: {pendiente_media:.2f} %")
+    else:
+        st.warning("⚠️ La longitud del cauce debe ser mayor que cero para calcular la pendiente.")
 
     # ---------------- Tabla base (ascendente) ----------------
     tabla_base = _hypsometric_table(
@@ -130,13 +123,8 @@ def render():
         st.error("Tabla hipsométrica vacía (posible problema en histogramado).")
         return
 
-    # =========================================================
-    # AJUSTE ORIENTACIÓN
-    # =========================================================
     if orientacion.startswith("Área desde arriba"):
-        # 1. Reordenar de mayor a menor cota
         tabla_desc = tabla_base.sort_values("Límite Inferior (m)", ascending=False).reset_index(drop=True)
-        # 2. Recalcular acumulado remanente (conforme descendemos)
         area_km2_desc = tabla_desc["Área (km²)"].to_numpy()
         cum_top_km2 = np.cumsum(area_km2_desc)
         total_km2 = cum_top_km2[-1]
@@ -144,16 +132,13 @@ def render():
 
         tabla_desc["Área Acumulada (km²) desde Arriba"] = cum_top_km2
         tabla_desc["Área Acumulada desde Arriba (%)"] = cum_top_pct
-        # Invalidar campos “desde abajo” (no aplican en este orden)
         tabla_desc["Área Acumulada (km²) desde Abajo"] = np.nan
         tabla_desc["Área Acumulada desde Abajo (%)"] = np.nan
 
-        # 3. Curva
         x_vals = cum_top_pct
         x_label = "Área acumulada desde arriba (%)"
         y_vals = tabla_desc["Altura Media de Clase (m)"].to_numpy()
 
-        # 4. Normalizada (misma forma que y_vals)
         if z_max_real > z_min_real:
             h_norm_full = (y_vals - z_min_real) / (z_max_real - z_min_real)
         else:
@@ -161,9 +146,7 @@ def render():
         h_norm_plot = (1 - h_norm_full) if REVERSE_NORMALIZED_FOR_TOP else h_norm_full
 
         tabla_para_mostrar = tabla_desc
-
     else:
-        # Orientación estándar (ascendente)
         x_vals = tabla_base["Área Acumulada desde Abajo (%)"].to_numpy()
         x_label = "Área acumulada desde abajo (%)"
         y_vals = tabla_base["Altura Media de Clase (m)"].to_numpy()
@@ -174,7 +157,9 @@ def render():
             h_norm_plot = np.zeros_like(y_vals)
 
         tabla_para_mostrar = tabla_base
+
     st.session_state["hypsometric_table"] = tabla_para_mostrar
+
     # ---------------- Gráfico ----------------
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.plot(x_vals, y_vals, linewidth=2, color="steelblue")
@@ -194,11 +179,9 @@ def render():
 
     st.pyplot(fig)
 
-    # ---------------- Índice hipsométrico ----------------
     hi = _hypsometric_integral(elev)
     st.info(f"Índice Hipsométrico (HI) = **{hi:.3f}**")
 
-    # ---------------- Tabla final ----------------
     cols_order = [
         "N° Clase", "Límite Inferior (m)", "Límite Superior (m)",
         "Altura Media de Clase (m)",
@@ -207,7 +190,6 @@ def render():
         "Área Acumulada desde Abajo (%)", "Área Acumulada desde Arriba (%)",
         "Área % de cada clase"
     ]
-    # Quitar duplicados solo por seguridad
     cols_unique = [c for c in cols_order if c in tabla_para_mostrar.columns]
     tabla_mostrar = tabla_para_mostrar[cols_unique]
 
@@ -232,15 +214,15 @@ def render():
         mime="text/csv"
     )
 
-    with st.expander("Ver tabla con fórmulas (documentación)"):
-        st.dataframe(_annotated_formulas(tabla_para_mostrar))
+    # with st.expander("Ver tabla con fórmulas (documentación)"):
+    #     st.dataframe(_annotated_formulas(tabla_para_mostrar))
 
     st.success(
         f"Elevación mínima: {z_min_real:.1f} m · máxima: {z_max_real:.1f} m · píxeles usados: {len(elev):,}"
     )
 
 # ============================================================
-# DEM Selection
+# OTHER HELPERS (unchanged)
 # ============================================================
 def _list_candidate_dems(folders):
     candidates = []
@@ -289,9 +271,6 @@ def _autoselect_dem_debug(gdf, debug=False):
             continue
     return None
 
-# ============================================================
-# Cargar y recortar DEM
-# ============================================================
 def _load_and_clip_dem(poly_gdf, dem_path):
     poly_gdf = _ensure_gdf_crs(poly_gdf)
     with rasterio.open(dem_path) as src:
@@ -302,12 +281,8 @@ def _load_and_clip_dem(poly_gdf, dem_path):
         nodata = src.nodata
         if nodata is not None:
             arr[arr == nodata] = np.nan
-        # arr[arr == 0] = np.nan  # Descomenta si 0 es mar/nodata
         return arr[~np.isnan(arr)], src.transform, r_crs
 
-# ============================================================
-# Bins estilo ArcGIS
-# ============================================================
 def _arcgis_bins(zmin, zmax):
     zmin_i = int(np.floor(zmin))
     zmax_i = int(np.ceil(zmax))
@@ -324,23 +299,16 @@ def _arcgis_bins(zmin, zmax):
         current_low = upper + 1
     return np.array(edges, dtype=float)
 
-# ============================================================
-# Tabla hipsométrica (ascendente base)
-# ============================================================
-def _hypsometric_table(elev, transform, num_clases=12, method="arcgis (100 m)",
-                       polygon_gdf=None, dem_crs=None):
+def _hypsometric_table(elev, transform, num_clases=12, method="arcgis (100 m)", polygon_gdf=None, dem_crs=None):
     elev = elev[~np.isnan(elev)]
     if elev.size == 0:
         return pd.DataFrame()
-
     z_min_real, z_max_real = float(np.min(elev)), float(np.max(elev))
-
     if dem_crs and dem_crs.is_geographic and polygon_gdf is not None:
         lat_center = polygon_gdf.geometry.unary_union.centroid.y
         pixel_area_m2 = _approx_pixel_area_m2(transform, lat_center)
     else:
         pixel_area_m2 = abs(transform.a) * abs(transform.e)
-
     if method.startswith("arcgis"):
         edges = _arcgis_bins(z_min_real, z_max_real)
     elif method == "cuantiles":
@@ -350,22 +318,18 @@ def _hypsometric_table(elev, transform, num_clases=12, method="arcgis (100 m)",
             edges = np.linspace(z_min_real, z_max_real, num_clases + 1)
     else:
         edges = np.linspace(z_min_real, z_max_real, num_clases + 1)
-
     edges = np.sort(edges)
     counts, h_edges = np.histogram(elev, bins=edges)
-
     area_m2 = counts * pixel_area_m2
     area_km2 = area_m2 / 1_000_000.0
     total_km2 = area_km2.sum()
     if total_km2 == 0:
         return pd.DataFrame()
-
     cum_down_km2 = np.cumsum(area_km2)
     cum_up_km2 = np.cumsum(area_km2[::-1])[::-1]
     cum_down_pct = (cum_down_km2 / total_km2) * 100
     cum_up_pct = (cum_up_km2 / total_km2) * 100
     pct_class = (area_km2 / total_km2) * 100
-
     rows = []
     for i in range(len(counts)):
         lower = h_edges[i]
@@ -384,33 +348,26 @@ def _hypsometric_table(elev, transform, num_clases=12, method="arcgis (100 m)",
             "Área Acumulada desde Arriba (%)": cum_up_pct[i],
             "Área % de cada clase": pct_class[i]
         })
-
     df = pd.DataFrame(rows)
     if not df.empty:
         df.at[df.index[-1], "Área Acumulada desde Abajo (%)"] = 100.0
-        df.at[df.index[0],  "Área Acumulada desde Arriba (%)"] = 100.0
+        df.at[df.index[0], "Área Acumulada desde Arriba (%)"] = 100.0
     return df
 
-# ============================================================
-# Tabla de fórmulas (documentación)
-# ============================================================
-def _annotated_formulas(df):
-    out = []
-    for _, r in df.iterrows():
-        out.append({
-            "N° Clase": r.get("N° Clase"),
-            "Fórmula Altura Media": "=(LímiteInferior + LímiteSuperior)/2",
-            "Fórmula Área (m²)": "=CuentaPixelesClase * ÁreaPixel",
-            "Fórmula Área (km²)": "=Área(m²)/1,000,000",
-            "Fórmula % clase": "=ÁreaClase(km²)/ÁreaTotal(km²)*100",
-            "Fórmula Acum abajo (%)": "Σ % clase desde mínima",
-            "Fórmula Acum arriba (%)": "Σ % clase desde esa hasta máxima"
-        })
-    return pd.DataFrame(out)
+# def _annotated_formulas(df):
+#     out = []
+#     for _, r in df.iterrows():
+#         out.append({
+#             "N° Clase": r.get("N° Clase"),
+#             "Fórmula Altura Media": "=(LímiteInferior + LímiteSuperior)/2",
+#             "Fórmula Área (m²)": "=CuentaPixelesClase * ÁreaPixel",
+#             "Fórmula Área (km²)": "=Área(m²)/1,000,000",
+#             "Fórmula % clase": "=ÁreaClase(km²)/ÁreaTotal(km²)*100",
+#             "Fórmula Acum abajo (%)": "Σ % clase desde mínima",
+#             "Fórmula Acum arriba (%)": "Σ % clase desde esa hasta máxima"
+#         })
+#     return pd.DataFrame(out)
 
-# ============================================================
-# Índice hipsométrico
-# ============================================================
 def _hypsometric_integral(elev):
     elev = elev[~np.isnan(elev)]
     if elev.size == 0:

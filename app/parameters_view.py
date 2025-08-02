@@ -35,6 +35,29 @@ def render():
     st.subheader("📋 Tabla de parámetros calculados")
     st.dataframe(df.style.format(precision=3), use_container_width=True)
 
+    st.markdown("""
+        <style>
+        /* Increase font size in the modern Glide-style DataFrame editor */
+        div[data-testid="stElementContainer"] {
+           font-size: 18px !important;
+        }        
+        .stDataFrameGlideDataEditor {
+            font-size: 18px !important;
+        }
+
+        /* Optional: make column headers larger */
+        .stDataFrameGlideDataEditor th {
+            font-size: 18px !important;
+            font-weight: bold !important;
+        }
+
+        /* Optional: padding to make rows taller */
+        .stDataFrameGlideDataEditor td {
+            padding: 12px 10px !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     st.download_button(
         "📥 Descargar parámetros CSV",
         data=df.to_csv(index=False).encode("utf-8"),

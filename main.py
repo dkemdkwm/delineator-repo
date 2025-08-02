@@ -1,5 +1,5 @@
 import streamlit as st
-from app import delineate, estimated_concentration_times, hypsometric_curve, parameters_view
+from app import conclusions_data, delineate, estimated_concentration_times, hypsometric_curve, parameters_view
 import base64
 from pathlib import Path
 from app.download_utils import (
@@ -46,12 +46,9 @@ st.markdown(
     .custom-header img {{ height: 55px; }}
     </style>
     <div class="custom-header">
-        <img src="data:image/png;base64,{logo1_base64}" />
+        <img src="data:image/png;base64,{logo1_base64}" style="width: 130px; height: 60px;" />
         <div class="title">
             Delimitación de cuencas hidrográficas<br/>
-            <span style="font-weight: 400; font-size: 15px;">
-                Selecciona un punto en el mapa para delimitar una cuenca hidrográfica 🗺️
-            </span>
         </div>
         <img src="data:image/png;base64,{logo2_base64}" />
     </div>
@@ -132,7 +129,7 @@ with st.sidebar:
         st.session_state["lat"] = st.session_state["last_click"]["lat"]
         st.session_state["lon"] = st.session_state["last_click"]["lng"]
 
-    if st.button("🚀 Delinear"):
+    if st.button("🚀 Delimitar"):
         from delineator import delineate_point
         import geopandas as gpd
 
@@ -291,7 +288,8 @@ tabs = st.tabs([
     "🌍 Mapa de Delimitación",
     "📊 Parámetros Morfométricos",
     "⏱️ Estimación tiempos de concentración",
-    "📈 Curva Hipsométrica"
+    "📈 Curva Hipsométrica",
+    "📋 Análisis morfométrico"
 ])
 
 with tabs[0]:
@@ -305,3 +303,30 @@ with tabs[2]:
 
 with tabs[3]:
     hypsometric_curve.render()
+
+with tabs[4]:
+    conclusions_data.render()
+
+# ------------------------------------------------------------------
+# Footer - Autores
+# ------------------------------------------------------------------
+st.markdown(
+    """
+    <div style="
+        margin-top: 3rem;
+        padding: 1rem;
+        border-top: 1px solid #ddd;
+        background-color: #fff;
+        border-radius: 8px;
+        box-shadow: 0 0 5px rgba(0,0,0,0.05);
+    ">
+        <p style="font-weight: bold; font-size: 14px; margin-bottom: 0.5rem;">Autores:</p>
+        <ul style="list-style-type: none; padding-left: 1rem; margin: 0;">
+            <li>👩‍🔬 Ingeniera Ambiental <strong>Laura Julieth Rodriguez Ramirez</strong></li>
+            <li>🧑‍🏫 MSc. Ing. <strong>Karel Aldrin Sánchez Hernández</strong></li>
+            <li>💻 Ingeniero de Sistemas <strong>Harold Stick Fique Ramirez</strong></li>
+        </ul>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
