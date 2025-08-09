@@ -108,7 +108,7 @@ MAP_RIVERS = True
 
 # On the web page map, if MAP_RIVERS is True, how many stream orders shall we display?
 # I recommend 4 or less. More than this and the browser may not display all the rivers in a large watershed.
-NUM_STREAM_ORDERS = 3
+NUM_STREAM_ORDERS = 99
 
 # Set to True to use the experimental match areas feature. 
 # You must include the field `area` in your outlets CSV file to use this feature (in km²)

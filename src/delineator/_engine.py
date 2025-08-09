@@ -52,6 +52,55 @@ gpd.options.use_pygeos = True
 # The WGS84 projection string, used in a few places
 PROJ_WGS84 = 'EPSG:4326'
 
+def _guess_terminal_comid(rivers_gdf, outlet_xy):
+    """
+    Pick the river segment that the outlet snaps to.
+    outlet_xy: (lon, lat)
+    Works with any CRS; reprojects if needed.
+    """
+    pt = Point(outlet_xy[0], outlet_xy[1])
+    g = rivers_gdf
+    if g.crs is None:
+        g = g.set_crs(4326)
+    if g.crs.to_epsg() != 4326:
+        from pyproj import CRS
+        to4326 = CRS.from_epsg(4326)
+        g = g.to_crs(to4326)
+    # nearest segment by planar distance in 4326 (good enough here)
+    idx = g.geometry.distance(pt).sort_values().index[0]
+    return idx
+
+def _walk_mainstem_ids(rivers_full, terminal_id):
+    """
+    Follow upstream from the terminal_id choosing the 'best' branch by:
+      (order, uparea, lengthkm). Falls back if a field is missing.
+    Expects rivers_full index to be COMID and to have up1..up4 (MERIT).
+    """
+    cols = rivers_full.columns
+    has = {c: (c in cols) for c in ['order', 'uparea', 'lengthkm']}
+    def key(u):
+        return (
+            rivers_full.at[u, 'order'] if has['order'] else 0,
+            rivers_full.at[u, 'uparea'] if has['uparea'] else 0.0,
+            rivers_full.at[u, 'lengthkm'] if has['lengthkm'] else 0.0
+        )
+
+    out = [terminal_id]
+    cur = terminal_id
+    while True:
+        ups = []
+        for c in ('up1','up2','up3','up4'):
+            if c in cols:
+                val = rivers_full.at[cur, c]
+                if isinstance(val, (int, np.integer)) and val != 0 and val in rivers_full.index:
+                    ups.append(val)
+        if not ups:
+            break
+        best = max(ups, key=key)
+        out.append(best)
+        cur = best
+    return out
+# ====================================================================
 
 def validate(gages_df: pd.DataFrame) -> bool:
     """
@@ -568,19 +617,70 @@ def delineate():
                 if myrivers_gdf.empty:
                     print("\n🚨 Skipping 'streams' layer: no rivers found after filtering.")
                 else:
-                    myrivers_gdf = myrivers_gdf[['lengthkm', 'order', 'geometry']]
+                    keep = [c for c in ("geometry", "order", "lengthkm", "uparea", "COMID") if c in myrivers_gdf.columns]
+                    myrivers_gdf = myrivers_gdf[keep].copy()
 
-                    max_order = myrivers_gdf.order.max()
-                    min_order = max_order - NUM_STREAM_ORDERS
+                    # ---------- tag the mainstem ----------
+                    try:
+                        gfull = rivers_gdf.copy()
 
-                    myrivers_gdf = myrivers_gdf[myrivers_gdf.order >= min_order]
-                    myrivers_gdf = myrivers_gdf.round(1)
+                        # ensure COMID index if available
+                        if "COMID" in gfull.columns and gfull.index.name != "COMID":
+                            gfull = gfull.set_index("COMID", drop=False)
+                        if "COMID" in myrivers_gdf.columns and myrivers_gdf.index.name != "COMID":
+                            myrivers_gdf = myrivers_gdf.set_index("COMID", drop=False)
 
-                    from shapely import wkt
-                    myrivers_gdf.geometry = myrivers_gdf.geometry.apply(lambda x: loads(re.sub(simpledec, mround, x.wkt)))
+                        # outlet point (prefer snapped outlet if you have it)
+                        # Replace these with your real vars if different:
+                        outlet_pt = Point(lng_snap, lat_snap)  # or Point(pour_lon, pour_lat)
 
+                        # find terminal segment by nearest distance
+                        terminal_comid = gfull.geometry.distance(outlet_pt).idxmin()
+
+                        # walk upstream choosing the "best" branch by (order, uparea, lengthkm)
+                        def _best_up(cur):
+                            ups = []
+                            for c in ("up1", "up2", "up3", "up4"):
+                                if c in gfull.columns:
+                                    val = gfull.at[cur, c]
+                                    if isinstance(val, (int, np.integer)) and val and val in gfull.index:
+                                        ups.append(val)
+                            if not ups:
+                                return None
+                            def key(u):
+                                return (
+                                    gfull.at[u, "order"]   if "order"   in gfull.columns else 0,
+                                    gfull.at[u, "uparea"]  if "uparea"  in gfull.columns else 0.0,
+                                    gfull.at[u, "lengthkm"]if "lengthkm"in gfull.columns else 0.0,
+                                )
+                            return max(ups, key=key)
+
+                        main_ids = [terminal_comid]
+                        seen = {terminal_comid}
+                        cur = terminal_comid
+                        while True:
+                            nxt = _best_up(cur)
+                            if nxt is None or nxt in seen:
+                                break
+                            main_ids.append(nxt)
+                            seen.add(nxt)
+                            cur = nxt
+
+                        myrivers_gdf["is_main"] = myrivers_gdf.index.isin(main_ids)
+
+                    except Exception as e:
+                        print(f"⚠️ Could not tag mainstem: {e}")
+                        myrivers_gdf["is_main"] = False
+
+                    # ---------- write layers ----------
                     outfile = f"{OUTPUT_DIR}/{wid}.{OUTPUT_EXT}"
                     myrivers_gdf.to_file(outfile, layer="streams", driver="GPKG")
+                    try:
+                        myrivers_gdf[ myrivers_gdf["is_main"]].to_file(outfile, layer="streams_main",  driver="GPKG")
+                        myrivers_gdf[~myrivers_gdf["is_main"]].to_file(outfile, layer="streams_tribs", driver="GPKG")
+                    except Exception as e:
+                        print(f"⚠️ Could not write split river layers: {e}")
+            # --------------------------------------------------------------------
 
 
             gpd.GeoDataFrame(geometry=[Point(lng ,  lat )], crs='EPSG:4326'

@@ -104,8 +104,8 @@ with st.sidebar:
     # --- Controles de Delineación ---
     st.markdown('<div class="sidebar-section section-title">🛰️ Controles y filtros</div>', unsafe_allow_html=True)
 
-    wid = st.text_input("ID de cuenca", value="custom", key="wid", label_visibility="collapsed")
-
+    # wid = st.text_input("ID de cuenca", value="custom", key="wid", label_visibility="collapsed")
+    wid = "custom"
     lat = st.number_input(
         "Latitud",
         value=st.session_state.get("lat", None),
@@ -321,10 +321,10 @@ st.markdown(
         box-shadow: 0 0 5px rgba(0,0,0,0.05);
     ">
         <p style="font-weight: bold; font-size: 14px; margin-bottom: 0.5rem;">Autores:</p>
-        <ul style="list-style-type: none; padding-left: 1rem; margin: 0;">
-            <li>👩‍🔬 Ingeniera Ambiental <strong>Laura Julieth Rodriguez Ramirez</strong></li>
-            <li>🧑‍🏫 MSc. Ing. <strong>Karel Aldrin Sánchez Hernández</strong></li>
-            <li>💻 Ingeniero de Sistemas <strong>Harold Stick Fique Ramirez</strong></li>
+        <ul style="list-style-type: circle; padding-left: 1rem; margin: 0;">
+            <li> Ingeniera Ambiental <strong>Laura Julieth Rodriguez Ramirez</strong></li>
+            <li> MSc. Ing. <strong>Karel Aldrin Sánchez Hernández</strong></li>
+            <li> Ingeniero de Sistemas <strong>Harold Stick Fique Ramirez</strong></li>
         </ul>
     </div>
     """,

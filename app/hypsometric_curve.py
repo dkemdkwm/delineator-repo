@@ -80,11 +80,11 @@ def render():
         if dem_path:
             st.session_state["dem_path"] = dem_path
 
-    if not dem_path:
-        st.error("❌ No se encontró un DEM que cubra la cuenca (ver debug).")
-        return
-    else:
-        st.success(f"✅ DEM usado: `{os.path.basename(dem_path)}`")
+    # if not dem_path:
+    #     st.error("❌ No se encontró un DEM que cubra la cuenca (ver debug).")
+    #     return
+    # else:
+    #     st.success(f"✅ DEM usado: `{os.path.basename(dem_path)}`")
 
     # ---------------- Parámetros UI ----------------
     esquema = "arcgis (100 m)"
@@ -217,9 +217,9 @@ def render():
     # with st.expander("Ver tabla con fórmulas (documentación)"):
     #     st.dataframe(_annotated_formulas(tabla_para_mostrar))
 
-    st.success(
-        f"Elevación mínima: {z_min_real:.1f} m · máxima: {z_max_real:.1f} m · píxeles usados: {len(elev):,}"
-    )
+    # st.success(
+    #     f"Elevación mínima: {z_min_real:.1f} m · máxima: {z_max_real:.1f} m · píxeles usados: {len(elev):,}"
+    # )
 
 # ============================================================
 # OTHER HELPERS (unchanged)

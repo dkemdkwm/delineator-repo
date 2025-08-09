@@ -8,6 +8,7 @@ from shapely.ops import unary_union, linemerge
 from shapely.geometry import LineString, MultiLineString, Polygon
 import heapq
 from collections import defaultdict
+from math import degrees
 
 # ------------------ CONFIGURABLE PARAMETERS ------------------
 ENDPOINT_CLUSTER_TOL = 25
@@ -282,7 +283,8 @@ def compute(
     watershed_gdf: gpd.GeoDataFrame,
     streams_gdf: gpd.GeoDataFrame | None = None,
     dem_path: str | None = None,
-    dem_search_folders = None
+    dem_search_folders = None,
+    slope_length_m: float | None = 5000.0, 
 ) -> dict:
 
     # Asegurar CRS de entrada (si faltaba)
@@ -331,11 +333,29 @@ def compute(
     )
     num_dren = len(streams_gdf) if streams_gdf is not None else np.nan
 
-    if not (np.isnan(delta_h) or np.isnan(longitud_cuenca)):
-        avg_slope_pct = (delta_h / (longitud_cuenca * 1000)) * 100
-        avg_slope_deg = np.degrees(np.arctan(delta_h / (longitud_cuenca * 1000)))
-    else:
+    # --- Average slope using ΔH / L (like hypsometric tool) ---
+    if np.isnan(delta_h):
         avg_slope_pct = avg_slope_deg = np.nan
+    else:
+        # decide L in meters
+        if slope_length_m is not None and slope_length_m > 0:
+            L_m = float(slope_length_m)
+        else:
+            # fallback heuristics if caller passes None/<=0
+            if not np.isnan(longitud_cp_l):        # preferred: corrected channel length (km)
+                L_m = longitud_cp_l * 1000.0
+            elif not np.isnan(longitud_cuenca):    # fallback: PCA basin length (km)
+                L_m = longitud_cuenca * 1000.0
+            else:
+                L_m = np.nan
+
+        if np.isnan(L_m) or L_m <= 0:
+            avg_slope_pct = avg_slope_deg = np.nan
+        else:
+            ratio = delta_h / L_m
+            avg_slope_pct = ratio * 100.0
+            avg_slope_deg = degrees(np.arctan(ratio))
+
 
     warning = None
     if dem_used is None:
@@ -366,6 +386,6 @@ def compute(
         "Número de drenajes": int(num_dren) if not np.isnan(num_dren) else np.nan,
         "Pendiente media (°)": round(avg_slope_deg, 3) if not np.isnan(avg_slope_deg) else np.nan,
         "Pendiente media (%)": round(avg_slope_pct, 3) if not np.isnan(avg_slope_pct) else np.nan,
-        "_DEM_usado": dem_used,
-        "_WARNING": warning
+        # "_DEM_usado": dem_used,
+        # "_WARNING": warning
     }

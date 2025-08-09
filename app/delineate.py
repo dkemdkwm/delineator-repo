@@ -6,6 +6,31 @@ from geopandas import gpd
 import pandas as pd
 from shapely.geometry import Point
 from folium import CustomIcon
+import json
+
+def _first_point_lonlat(geojson_obj_or_str):
+    """Return (lon, lat) of the first Point in a GeoJSON Feature/FeatureCollection."""
+    try:
+        gj = json.loads(geojson_obj_or_str) if isinstance(geojson_obj_or_str, str) else geojson_obj_or_str
+    except Exception:
+        return None
+
+    def find_point_coords(g):
+        t = g.get("type")
+        if t == "FeatureCollection":
+            for f in g.get("features", []):
+                coords = find_point_coords(f)
+                if coords: return coords
+        elif t == "Feature":
+            return find_point_coords(g.get("geometry") or {})
+        elif t == "Point":
+            c = g.get("coordinates")
+            if isinstance(c, (list, tuple)) and len(c) == 2:
+                return (float(c[0]), float(c[1]))  # (lon, lat)
+        return None
+
+    return find_point_coords(gj)
+
 
 def render():
     if "last_click" not in st.session_state:
@@ -173,7 +198,11 @@ def render():
         folium.GeoJson(
             st.session_state["streams"],
             name="Ríos",
-            style_function=lambda _: {"color": "blue", "weight": 2},
+            style_function=lambda feat: {
+                "color": "#0077b6" if feat["properties"].get("is_main") else "#00b4d8",
+                "weight": 4 if feat["properties"].get("is_main") else 2,
+                "opacity": 1.0 if feat["properties"].get("is_main") else 0.9
+            },
             tooltip="Ríos"
         ).add_to(m)
 
@@ -181,17 +210,31 @@ def render():
         folium.GeoJson(
             st.session_state["requested_point"],
             name="Punto solicitado",
-            marker=folium.CircleMarker(radius=6, color="cyan", fill=True, fill_opacity=1),
+            marker=folium.CircleMarker(radius=6, color="lightgreen", fill=True, fill_opacity=1),
             tooltip="Punto de solicitud"
         ).add_to(m)
 
-    if st.session_state.get("show_snapped_pt") and "snap_point" in st.session_state:
-        folium.GeoJson(
-            st.session_state["snap_point"],
-            name="Punto ajustado al cauce",
-            marker=folium.CircleMarker(radius=6, color="magenta", fill=True, fill_opacity=1),
-            tooltip="Punto de desfogue"
-        ).add_to(m)
+        if st.session_state.get("show_snapped_pt") and "snap_point" in st.session_state:
+            pt = _first_point_lonlat(st.session_state["snap_point"])
+            if pt:
+                lon, lat = pt
+                folium.Marker(
+                    location=[lat, lon],
+                    tooltip="Punto de desfogue (ajustado)",
+                    icon=folium.Icon(color="purple", icon="tint", prefix="fa")
+                ).add_to(m)
+
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=6,
+                    color="magenta",
+                    fill=True,
+                    fill_opacity=1
+                ).add_to(m)
+
+            else:
+                st.warning("⚠️ No se pudo leer el punto ajustado (GeoJSON inválido).")
+
 
     if "map_bounds" in st.session_state:
         try:
