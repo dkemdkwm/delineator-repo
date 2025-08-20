@@ -3,7 +3,10 @@ import geopandas as gpd
 
 def render():
     st.title("📋 Análisis morfométrico")
-
+    gpkg_path = st.session_state.get("gpkg_path")
+    if not gpkg_path:
+        st.info("⚠️ Delimita una cuenca primero.")
+        return
     morpho = st.session_state.get("morpho", {})
     lat = st.session_state.get("lat", "—")
     lon = st.session_state.get("lon", "—")
