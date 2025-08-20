@@ -7,6 +7,29 @@ import pandas as pd
 from shapely.geometry import Point
 from folium import CustomIcon
 import json
+from shapely.geometry import shape
+from shapely.ops import unary_union
+
+def _as_ws_geom(geojson_any):
+    """Return a valid unary union of watershed geometry (Polygon/MultiPolygon) from any GeoJSON form."""
+    gj = json.loads(geojson_any) if isinstance(geojson_any, str) else geojson_any
+    t = gj.get("type")
+    geoms = []
+    if t == "FeatureCollection":
+        geoms = [shape(f["geometry"]) for f in gj.get("features", []) if f.get("geometry")]
+    elif t == "Feature":
+        if gj.get("geometry"): geoms = [shape(gj["geometry"])]
+    else:
+        geoms = [shape(gj)]  # raw geometry dict
+    if not geoms:
+        return None
+    u = unary_union(geoms)
+    # fix self-intersections
+    try:
+        u = u.buffer(0)
+    except Exception:
+        pass
+    return u
 
 def _first_point_lonlat(geojson_obj_or_str):
     """Return (lon, lat) of the first Point in a GeoJSON Feature/FeatureCollection."""
@@ -127,59 +150,109 @@ def render():
             if pd.api.types.is_object_dtype(gdf_cne[col]) or pd.api.types.is_datetime64_any_dtype(gdf_cne[col]):
                 gdf_cne[col] = gdf_cne[col].astype(str)
 
-        # Filter by proximity if point is selected
-        if st.session_state["last_click"]:
-            click_point = Point(
-                st.session_state["last_click"]["lng"],
-                st.session_state["last_click"]["lat"]
-            )
+        # # Filter by proximity if point is selected
+        # if st.session_state["last_click"]:
+        #     click_point = Point(
+        #         st.session_state["last_click"]["lng"],
+        #         st.session_state["last_click"]["lat"]
+        #     )
 
-            buffer_radius_degrees = 0.15  # ~1km radius at equator (adjust if needed)
-            point_buffer = click_point.buffer(buffer_radius_degrees)
-            gdf_filtered = gdf_cne[gdf_cne.geometry.intersects(point_buffer)]
-            icon_url = "app/cloudSunIcon.png"
-            if not gdf_filtered.empty:
-                # folium.GeoJson(
-                #     data=gdf_filtered.__geo_interface__,
-                #     name="CNE IDEAM (filtrado)",
-                #     style_function=lambda feature: {
-                #         "fillColor": "#3388ff",
-                #         "color": "#2255aa",
-                #         "weight": 2,
-                #         "fillOpacity": 0.3,
-                #     },
-                #     tooltip=folium.GeoJsonTooltip(
-                #         fields=["NOMBRE", "CODIGO"] if "NOMBRE" in gdf_filtered.columns and "CODIGO" in gdf_filtered.columns
-                #         else gdf_filtered.columns[:2].tolist()
-                #     )
-                # ).add_to(m)
-                st.session_state["estaciones_filtradas"] = gdf_filtered.to_dict("records")
-                for _, row in gdf_filtered.iterrows():
-                    geom = row.geometry
-                    if geom.geom_type == "Point":
-                        # Try alternate keys if NOMBRE or CODIGO are not exact
-                        nombre = str(row.get("NOMBRE") or row.get("Nombre") or row.get("nombre") or "").strip()
-                        codigo = str(row.get("CODIGO") or row.get("Codigo") or row.get("codigo") or "").strip()
-                        tooltip_html = f"""
-                        <b>NOMBRE:</b> {nombre}<br>
-                        <b>CODIGO:</b> {codigo}
-                        """
-                        folium.Marker(
-                            location=[geom.y, geom.x],
-                            icon=CustomIcon(
-                                icon_image=icon_url,
-                                icon_size=(60, 60),
-                                icon_anchor=(20, 20)
-                            ),
-                            tooltip=Tooltip(tooltip_html)
-                        ).add_to(m)
-            else:
-                st.warning("⚠️ No se encontraron entidades CNE_IDEAM cercanas al punto seleccionado.")
-        else:
-            # Show bounding box only when no point is selected
-            bounds = gdf_cne.total_bounds
-            m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+        #     buffer_radius_degrees = 0.15  # ~1km radius at equator (adjust if needed)
+        #     point_buffer = click_point.buffer(buffer_radius_degrees)
+        #     gdf_filtered = gdf_cne[gdf_cne.geometry.intersects(point_buffer)]
+        #     icon_url = "app/cloudSunIcon.png"
+        #     if not gdf_filtered.empty:
+        #         # folium.GeoJson(
+        #         #     data=gdf_filtered.__geo_interface__,
+        #         #     name="CNE IDEAM (filtrado)",
+        #         #     style_function=lambda feature: {
+        #         #         "fillColor": "#3388ff",
+        #         #         "color": "#2255aa",
+        #         #         "weight": 2,
+        #         #         "fillOpacity": 0.3,
+        #         #     },
+        #         #     tooltip=folium.GeoJsonTooltip(
+        #         #         fields=["NOMBRE", "CODIGO"] if "NOMBRE" in gdf_filtered.columns and "CODIGO" in gdf_filtered.columns
+        #         #         else gdf_filtered.columns[:2].tolist()
+        #         #     )
+        #         # ).add_to(m)
+        #         st.session_state["estaciones_filtradas"] = gdf_filtered.to_dict("records")
+        #         for _, row in gdf_filtered.iterrows():
+        #             geom = row.geometry
+        #             if geom.geom_type == "Point":
+        #                 # Try alternate keys if NOMBRE or CODIGO are not exact
+        #                 nombre = str(row.get("NOMBRE") or row.get("Nombre") or row.get("nombre") or "").strip()
+        #                 codigo = str(row.get("CODIGO") or row.get("Codigo") or row.get("codigo") or "").strip()
+        #                 tooltip_html = f"""
+        #                 <b>NOMBRE:</b> {nombre}<br>
+        #                 <b>CODIGO:</b> {codigo}
+        #                 """
+        #                 folium.Marker(
+        #                     location=[geom.y, geom.x],
+        #                     icon=CustomIcon(
+        #                         icon_image=icon_url,
+        #                         icon_size=(60, 60),
+        #                         icon_anchor=(20, 20)
+        #                     ),
+        #                     tooltip=Tooltip(tooltip_html)
+        #                 ).add_to(m)
+        #     else:
+        #         st.warning("⚠️ No se encontraron entidades CNE_IDEAM cercanas al punto seleccionado.")
+        # else:
+        #     # Show bounding box only when no point is selected
+        #     bounds = gdf_cne.total_bounds
+        #     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+        # ── Filter CNE by watershed with tolerance (proximity to basin) ──────────────
+        if st.session_state.get("geojson"):
+            try:
+                ws_union = _as_ws_geom(st.session_state["geojson"])
+                if not ws_union or ws_union.is_empty:
+                    st.warning("⚠️ GeoJSON de cuenca inválido o vacío.")
+                else:
+                    # === TOLERANCE (km) → degrees ===
+                    buffer_km = 5  # 🔧 change this to taste (e.g., 0.2–2.0 km)
+                    deg_tol = buffer_km / 111.0  # ~111 km per degree latitude
 
+                    # Buffer OUTWARD so “nearby” stations are included (like click buffer)
+                    ws_buffered = ws_union.buffer(deg_tol)
+
+                    # Quick bbox prefilter for speed
+                    minx, miny, maxx, maxy = ws_buffered.bounds
+                    cne_bbox = gdf_cne[
+                        (gdf_cne.geometry.x >= minx) & (gdf_cne.geometry.x <= maxx) &
+                        (gdf_cne.geometry.y >= miny) & (gdf_cne.geometry.y <= maxy)
+                    ].copy()
+
+                    # Proximity predicate: intersects buffered basin
+                    gdf_filtered = cne_bbox[cne_bbox.geometry.intersects(ws_buffered)]
+
+                    icon_url = "app/cloudSunIcon.png"
+                    if not gdf_filtered.empty:
+                        st.session_state["estaciones_filtradas"] = gdf_filtered.to_dict("records")
+
+                        # Optional: group layer
+                        fg_ws = folium.FeatureGroup(
+                            name=f"CNE IDEAM (dentro o a ≤{buffer_km} km de la cuenca)",
+                            show=True
+                        )
+
+                        for _, row in gdf_filtered.iterrows():
+                            p = row.geometry
+                            nombre = str(row.get("NOMBRE") or row.get("Nombre") or row.get("nombre") or "").strip()
+                            codigo = str(row.get("CODIGO") or row.get("Codigo") or row.get("codigo") or "").strip()
+                            tooltip_html = f"<b>NOMBRE:</b> {nombre}<br><b>CODIGO:</b> {codigo}"
+
+                            folium.Marker(
+                                location=[p.y, p.x],
+                                icon=CustomIcon(icon_image=icon_url, icon_size=(60, 60), icon_anchor=(20, 20)),
+                                tooltip=Tooltip(tooltip_html)
+                            ).add_to(fg_ws)
+
+                        fg_ws.add_to(m)
+                    else:
+                        st.warning(f"⚠️ No se encontraron entidades CNE_IDEAM a ≤{buffer_km} km de la cuenca.")
+            except Exception as e:
+                st.warning(f"⚠️ No se pudo procesar estaciones respecto a la cuenca: {e}")
     except Exception as e:
         st.warning(f"⚠️ No se pudo procesar el shapefile CNE_IDEAM: {e}")
 

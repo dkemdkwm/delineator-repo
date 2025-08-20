@@ -26,7 +26,6 @@ def render():
 
     params = st.session_state["morpho"]
 
-    # Show as styled table
     df = pd.DataFrame({
         "Parámetro": list(params.keys()),
         "Valor": list(params.values())

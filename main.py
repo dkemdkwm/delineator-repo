@@ -124,7 +124,6 @@ with st.sidebar:
         label_visibility="collapsed"
     )
 
-    # Último click (si viene del mapa)
     if st.session_state.get("last_click"):
         st.session_state["lat"] = st.session_state["last_click"]["lat"]
         st.session_state["lon"] = st.session_state["last_click"]["lng"]
@@ -134,11 +133,9 @@ with st.sidebar:
         import geopandas as gpd
 
         lat = lat or st.session_state.get("lat")
-        lon = lon or st.session_state.get("lon")
+        lon = lon or st.session_state.get("lon") 
 
         if lat and lon:
-            st.session_state["lat"], st.session_state["lon"] = lat, lon
-            st.success(f"📍 lat={lat}, lon={lon}")
 
             with st.spinner("Ejecutando delimitación…"):
                 gpkg_path = delineate_point(lat, lon, wid, None)
@@ -173,7 +170,15 @@ with st.sidebar:
                         center_lon = (bounds[0] + bounds[2]) / 2
                         st.session_state["map_center"] = [center_lat, center_lon]
                         st.session_state["map_bounds"] = [[bounds[1], bounds[0]], [bounds[3], bounds[2]]]
-
+                    st.markdown("**🔭 Coordenadas**")
+                    if st.session_state.get("requested_point"):
+                        lon_r, lat_r = delineate._first_point_lonlat(st.session_state["requested_point"]) or (None, None)
+                        if lat_r is not None:
+                            st.write(f"🟢 Solicitado: lat={lat_r:.6f}, lon={lon_r:.6f}")
+                    if st.session_state.get("snap_point"):
+                        lon_s, lat_s = delineate._first_point_lonlat(st.session_state["snap_point"]) or (None, None)
+                        if lat_s is not None:
+                            st.write(f"🟣 Ajustado:   lat={lat_s:.6f}, lon={lon_s:.6f}")
                 except Exception as e:
                     st.error(f"⚠️ Error cargando GPKG: {e}")
         else:
@@ -218,7 +223,6 @@ with st.sidebar:
                 index=base_options.index(st.session_state.base_map_choice)
             )
 
-    # --- Descargas ---
     st.markdown('<div class="section-title">📦 Descargas</div>', unsafe_allow_html=True)
 
     gpkg_path = st.session_state.get("gpkg_path")
@@ -322,9 +326,15 @@ st.markdown(
     ">
         <p style="font-weight: bold; font-size: 14px; margin-bottom: 0.5rem;">Autores:</p>
         <ul style="list-style-type: circle; padding-left: 1rem; margin: 0;">
-            <li> Ingeniera Ambiental <strong>Laura Julieth Rodriguez Ramirez</strong></li>
-            <li> MSc. Ing. <strong>Karel Aldrin Sánchez Hernández</strong></li>
-            <li> Ingeniero de Sistemas <strong>Harold Stick Fique Ramirez</strong></li>
+            <li> Ingeniera Ambiental <strong>Laura Julieth Rodriguez Ramirez</strong><br>
+                <a href="mailto:laurajuliethrodriguez@ucundinamarca.edu.co" style="font-size: 13px; color: #0066cc;">laurajuliethrodriguez@ucundinamarca.edu.co</a>
+            </li>
+            <li> MSc. Ing. <strong>Karel Aldrin Sánchez Hernández</strong><br>
+                <a href="mailto:kasanchez@ucundinamarca.edu.co" style="font-size: 13px; color: #0066cc;">kasanchez@ucundinamarca.edu.co</a>
+            </li>
+            <li> Ingeniero de Sistemas <strong>Harold Stick Fique Ramirez</strong><br>
+                <a href="mailto:hfique@unundinamarca.edu.co" style="font-size: 13px; color: #0066cc;">hfique@unundinamarca.edu.co</a>
+            </li>
         </ul>
     </div>
     """,

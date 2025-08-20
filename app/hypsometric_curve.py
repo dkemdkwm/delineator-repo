@@ -130,13 +130,13 @@ def render():
         total_km2 = cum_top_km2[-1]
         cum_top_pct = (cum_top_km2 / total_km2) * 100
 
-        tabla_desc["Área Acumulada (km²) desde Arriba"] = cum_top_km2
-        tabla_desc["Área Acumulada desde Arriba (%)"] = cum_top_pct
+        tabla_desc["Área Acumulada (km²)"] = cum_top_km2
+        tabla_desc["Área Acumulada (%)"] = cum_top_pct
         tabla_desc["Área Acumulada (km²) desde Abajo"] = np.nan
         tabla_desc["Área Acumulada desde Abajo (%)"] = np.nan
 
         x_vals = cum_top_pct
-        x_label = "Área acumulada desde arriba (%)"
+        x_label = "Área acumulada (%)"
         y_vals = tabla_desc["Altura Media de Clase (m)"].to_numpy()
 
         if z_max_real > z_min_real:
@@ -186,8 +186,8 @@ def render():
         "N° Clase", "Límite Inferior (m)", "Límite Superior (m)",
         "Altura Media de Clase (m)",
         "Área (m²)", "Área (km²)",
-        "Área Acumulada (km²) desde Abajo", "Área Acumulada (km²) desde Arriba",
-        "Área Acumulada desde Abajo (%)", "Área Acumulada desde Arriba (%)",
+        "Área Acumulada (km²)",
+        "Área Acumulada (%)",
         "Área % de cada clase"
     ]
     cols_unique = [c for c in cols_order if c in tabla_para_mostrar.columns]
@@ -199,10 +199,8 @@ def render():
             "Altura Media de Clase (m)": "{:.1f}",
             "Área (m²)": "{:,.0f}",
             "Área (km²)": "{:.2f}",
-            "Área Acumulada (km²) desde Abajo": "{:.2f}",
-            "Área Acumulada (km²) desde Arriba": "{:.2f}",
-            "Área Acumulada desde Abajo (%)": "{:.2f}",
-            "Área Acumulada desde Arriba (%)": "{:.2f}",
+            "Área Acumulada (km²)": "{:.2f}",
+            "Área Acumulada (%)": "{:.2f}",
             "Área % de cada clase": "{:.2f}"
         })
     )
@@ -343,15 +341,15 @@ def _hypsometric_table(elev, transform, num_clases=12, method="arcgis (100 m)", 
             "Área (m²)": area_m2[i],
             "Área (km²)": area_km2[i],
             "Área Acumulada (km²) desde Abajo": cum_down_km2[i],
-            "Área Acumulada (km²) desde Arriba": cum_up_km2[i],
+            "Área Acumulada (km²)": cum_up_km2[i],
             "Área Acumulada desde Abajo (%)": cum_down_pct[i],
-            "Área Acumulada desde Arriba (%)": cum_up_pct[i],
+            "Área Acumulada (%)": cum_up_pct[i],
             "Área % de cada clase": pct_class[i]
         })
     df = pd.DataFrame(rows)
     if not df.empty:
         df.at[df.index[-1], "Área Acumulada desde Abajo (%)"] = 100.0
-        df.at[df.index[0], "Área Acumulada desde Arriba (%)"] = 100.0
+        df.at[df.index[0], "Área Acumulada (%)"] = 100.0
     return df
 
 # def _annotated_formulas(df):
