@@ -68,7 +68,7 @@ def render():
         "Temez": temez
     }])
     st.session_state["tc_results"] = results
-    st.subheader("Resultados de Tiempo de Concentración (min)")
+    st.subheader("Resultados de Tiempo de Concentración (horas)")
     st.dataframe(results.style.format("{:.2f}"))
 
     if warnings:

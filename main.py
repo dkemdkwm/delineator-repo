@@ -12,6 +12,9 @@ import sys
 import os
 import pandas as pd
 import geopandas as gpd
+from shapely import wkt
+import json
+from shapely.geometry import Point, shape as gj_shape
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
@@ -145,13 +148,16 @@ with st.sidebar:
             else:
                 st.session_state["gpkg_path"] = gpkg_path
                 try:
-                    watershed_gdf = gpd.read_file(gpkg_path)
+                    watershed_gdf = gpd.read_file(gpkg_path, layer="watershed")
                     st.session_state["geojson"] = watershed_gdf.to_json()
 
                     for layer, key in [
                         ("streams", "streams"),
+                        ("streams_main", "streams_main"),
+                        ("streams_tribs", "streams_tribs"),
+                        ("pour_point", "pour_point"),
                         ("snap_point", "snap_point"),
-                        ("pour_point", "requested_point")
+                        ("streams_hr", "streams_hr"),
                     ]:
                         try:
                             st.session_state[key] = gpd.read_file(gpkg_path, layer=layer).to_json()
@@ -170,15 +176,30 @@ with st.sidebar:
                         center_lon = (bounds[0] + bounds[2]) / 2
                         st.session_state["map_center"] = [center_lat, center_lon]
                         st.session_state["map_bounds"] = [[bounds[1], bounds[0]], [bounds[3], bounds[2]]]
+                    if "pour_point" in st.session_state and st.session_state.get("pour_point"):
+                        st.session_state["requested_point"] = st.session_state["pour_point"]
                     st.markdown("**🔭 Coordenadas**")
+
+                    # Punto solicitado (tolerante a vacíos)
                     if st.session_state.get("requested_point"):
-                        lon_r, lat_r = delineate._first_point_lonlat(st.session_state["requested_point"]) or (None, None)
-                        if lat_r is not None:
+                        lon_r, lat_r = (None, None)
+                        try:
+                            lon_r, lat_r = delineate._first_point_lonlat(st.session_state["requested_point"])
+                        except Exception:
+                            pass
+                        if lat_r is not None and lon_r is not None:
                             st.write(f"🟢 Solicitado: lat={lat_r:.6f}, lon={lon_r:.6f}")
+
+                    # Punto ajustado al cauce (tolerante a vacíos)
                     if st.session_state.get("snap_point"):
-                        lon_s, lat_s = delineate._first_point_lonlat(st.session_state["snap_point"]) or (None, None)
-                        if lat_s is not None:
+                        lon_s, lat_s = (None, None)
+                        try:
+                            lon_s, lat_s = delineate._first_point_lonlat(st.session_state["snap_point"])
+                        except Exception:
+                            pass
+                        if lat_s is not None and lon_s is not None:
                             st.write(f"🟣 Ajustado:   lat={lat_s:.6f}, lon={lon_s:.6f}")
+
                 except Exception as e:
                     st.error(f"⚠️ Error cargando GPKG: {e}")
         else:
@@ -206,7 +227,13 @@ with st.sidebar:
             st.session_state.show_snapped_pt = st.checkbox(
                 "Punto ajustado al cauce", value=st.session_state.show_snapped_pt, key="cb_pt_snap"
             )
+            st.session_state.setdefault("show_cne", True)
 
+            st.session_state.show_cne = st.checkbox(
+                "Estaciones Meteorológicas",
+                value=st.session_state.show_cne,
+                key="cb_cne"
+            )
             st.markdown("### 🌐 Mapa base")
             base_options = [
                 "OpenStreetMap",
@@ -272,17 +299,69 @@ with st.sidebar:
         except Exception as e:
             st.warning(f"No se pudo generar Excel: {e}")
 
-    if gpkg_path:
-        try:
-            shp_zip = build_watershed_shapefile_zip(gpkg_path)
-            st.download_button(
-                "🗺️ Shapefile (ZIP)",
-                data=shp_zip,
-                file_name="cuenca.zip",
-                mime="application/zip"
-            )
-        except Exception as e:
-            st.warning(f"No se pudo exportar Shapefile: {e}")
+        if gpkg_path:
+            try:
+                # Layers that live inside the GPKG
+                gpkg_layers = ["watershed", "streams", "streams_main", "pour_point", "snap_point"]
+
+                # Build an extra layer for CNE stations (from session state)
+                extra = {}
+
+                if st.session_state.get("estaciones_filtradas"):
+                    try:
+                        df = pd.DataFrame(st.session_state["estaciones_filtradas"])
+
+                        def to_geom(val):
+                            # Already a shapely geometry
+                            if hasattr(val, "geom_type"):
+                                return val
+                            # WKT string
+                            if isinstance(val, str):
+                                try:
+                                    return wkt.loads(val)
+                                except Exception:
+                                    try:
+                                        return gj_shape(json.loads(val))
+                                    except Exception:
+                                        return None
+                            # Raw GeoJSON dict
+                            if isinstance(val, dict):
+                                try:
+                                    return gj_shape(val)
+                                except Exception:
+                                    return None
+                            return None
+
+                        if "geometry" in df.columns:
+                            df["geometry"] = df["geometry"].apply(to_geom)
+                        elif {"lon", "lat"}.issubset(df.columns):
+                            df["geometry"] = [Point(xy) for xy in zip(df["lon"], df["lat"])]
+                        elif {"longitude", "latitude"}.issubset(df.columns):
+                            df["geometry"] = [Point(xy) for xy in zip(df["longitude"], df["latitude"])]
+
+                        df = df[df["geometry"].notna()].copy()
+
+                        if not df.empty:
+                            gdf_cne = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+                            extra["cne_stations"] = gdf_cne
+                    except Exception as e:
+                        st.warning(f"No se pudo reconstruir estaciones CNE: {e}")
+
+
+                shp_zip = build_watershed_shapefile_zip(
+                    gpkg_path,
+                    layers=gpkg_layers,
+                    extra_layers=extra,  # NEW
+                )
+                st.download_button(
+                    "🗺️ Shapefile (ZIP)",
+                    data=shp_zip,
+                    file_name="cuenca_y_capas.zip",
+                    mime="application/zip"
+                )
+            except Exception as e:
+                st.warning(f"No se pudo exportar Shapefile: {e}")
+
 
 
 # ------------------------------------------------------------------

@@ -51,7 +51,26 @@ gpd.options.use_pygeos = True
 
 # The WGS84 projection string, used in a few places
 PROJ_WGS84 = 'EPSG:4326'
+from pyproj import Geod, CRS, Transformer
+GEOD = Geod(ellps="WGS84")
 
+def get_area(poly):
+    """
+    Return basin area in km² using geodesic area (robust, no proj issues).
+    """
+    try:
+        area_m2, _ = GEOD.geometry_area_perimeter(poly)
+        return abs(area_m2) / 1e6
+    except Exception:
+        # Fallback: non-degenerate Albers (separate std. parallels)
+        minx, miny, maxx, maxy = poly.bounds
+        lat1, lat2 = float(miny), float(maxy)
+        if abs(lat2 - lat1) < 1e-6:
+            mid = 0.5 * (lat1 + lat2)
+            lat1, lat2 = mid - 1.0, mid + 1.0
+        proj_to = CRS.from_proj4(f"+proj=aea +lat_1={lat1} +lat_2={lat2} +datum=WGS84")
+        xf = Transformer.from_crs("EPSG:4326", proj_to, always_xy=True).transform
+        return shapely.ops.transform(xf, poly).area / 1e6
 def _guess_terminal_comid(rivers_gdf, outlet_xy):
     """
     Pick the river segment that the outlet snaps to.
@@ -101,6 +120,12 @@ def _walk_mainstem_ids(rivers_full, terminal_id):
         cur = best
     return out
 # ====================================================================
+
+def _clip_hydrorivers_to_basin(basin_poly):
+    basin_gdf = gpd.GeoDataFrame(geometry=[basin_poly], crs='EPSG:4326')
+    hr = gpd.read_file(HYDRORIVERS_SHP).to_crs('EPSG:4326')
+    hr = hr[hr.intersects(basin_poly.buffer(0))]   # cheap spatial filter
+    return gpd.clip(hr, basin_gdf)
 
 def validate(gages_df: pd.DataFrame) -> bool:
     """
@@ -590,9 +615,29 @@ def delineate():
                 mybasin_gdf['result'] = "Low Res"
                 gages_df.at[wid, 'result'] = "low res"
 
+            try:
                 snapped_outlet = rivers_gdf.loc[terminal_comid].geometry.coords[0]
-                lat_snap = snapped_outlet[1]
-                lng_snap = snapped_outlet[0]
+                lat_snap, lng_snap = snapped_outlet[1], snapped_outlet[0]
+            except Exception:
+                # Fallback: nearest HydroRIVERS segment within the basin
+                outlet_pt = Point(lng, lat)
+                try:
+                    hr_clip = _clip_hydrorivers_to_basin(basin_poly)
+                    if len(hr_clip):
+                        dists = hr_clip.distance(outlet_pt)
+                        rid = dists.idxmin()
+                        nearest_pt = shapely.ops.nearest_points(outlet_pt, hr_clip.loc[rid].geometry)[1]
+                        lat_snap, lng_snap = float(nearest_pt.y), float(nearest_pt.x)
+                    else:
+                        lat_snap, lng_snap = lat, lng
+                except Exception as e:
+                    print(f"⚠️ HydroRIVERS snapping fallback failed: {e}")
+                    lat_snap, lng_snap = lat, lng
+            def _valid_xy(x, y):
+                try:
+                    return (x is not None) and (y is not None) and (float("nan") not in (float(x), float(y)))
+                except Exception:
+                    return False
 
             # Get the (approx.) snap distance
             geod = pyproj.Geod(ellps='WGS84')
@@ -609,84 +654,111 @@ def delineate():
             outfile = f"{OUTPUT_DIR}/{wid}.{OUTPUT_EXT}"          # ➊  define first!
 
             mybasin_gdf.to_file(outfile, layer="watershed", driver="GPKG")
+            if _valid_xy(lng, lat):
+                gpd.GeoDataFrame(geometry=[Point(lng, lat)], crs="EPSG:4326").to_file(
+                    outfile, layer="pour_point", driver="GPKG"
+                )
+            if _valid_xy(lng_snap, lat_snap):
+                gpd.GeoDataFrame(geometry=[Point(lng_snap, lat_snap)], crs="EPSG:4326").to_file(
+                    outfile, layer="snap_point", driver="GPKG"
+                )
+            # if MAP_RIVERS and USE_HYDRO_RIVERS_FOR_MAP:
+            #     basin_poly = mybasin_gdf.geometry.values[0]
+            #     basin_gdf = gpd.GeoDataFrame(geometry=[basin_poly], crs='EPSG:4326')
 
-            if MAP_RIVERS:
-                myrivers_gdf = rivers_gdf.loc[B]
+            #     hr = gpd.read_file(HYDRORIVERS_SHP).to_crs('EPSG:4326')
+            #     # spatial filter: quick bbox first, then exact clip
+            #     hr = hr[hr.intersects(basin_poly.buffer(0))]  # avoid topo errors
+            #     hr_clip = gpd.clip(hr, basin_gdf)
 
-                # Ensure the DataFrame isn't empty
-                if myrivers_gdf.empty:
-                    print("\n🚨 Skipping 'streams' layer: no rivers found after filtering.")
-                else:
-                    keep = [c for c in ("geometry", "order", "lengthkm", "uparea", "COMID") if c in myrivers_gdf.columns]
-                    myrivers_gdf = myrivers_gdf[keep].copy()
+            #     keep = [c for c in ('geometry','ORD_CLAS','ORD_STRA','LENGTH_KM','HYRIV_ID') if c in hr_clip.columns]
+            #     if keep:
+            #         hr_clip = hr_clip[keep]
 
-                    # ---------- tag the mainstem ----------
-                    try:
-                        gfull = rivers_gdf.copy()
+            #     outfile = f"{OUTPUT_DIR}/{wid}.{OUTPUT_EXT}"
+            #     hr_clip.to_file(outfile, layer="streams", driver="GPKG")
+            # else:
+            #     # existing MERIT-based streams writing (myrivers_gdf = rivers_gdf.loc[B] ... to_file(...))
+            #     myrivers_gdf = rivers_gdf.loc[B]
+    if MAP_RIVERS:
+        # compute once
+        basin_poly = mybasin_gdf.geometry.values[0]
+        hr_clip = _clip_hydrorivers_to_basin(basin_poly)
 
-                        # ensure COMID index if available
-                        if "COMID" in gfull.columns and gfull.index.name != "COMID":
-                            gfull = gfull.set_index("COMID", drop=False)
-                        if "COMID" in myrivers_gdf.columns and myrivers_gdf.index.name != "COMID":
-                            myrivers_gdf = myrivers_gdf.set_index("COMID", drop=False)
+        # MERIT rivers for this watershed (may be empty/gappy)
+        myrivers_gdf = rivers_gdf.loc[B]
+        outfile = f"{OUTPUT_DIR}/{wid}.{OUTPUT_EXT}"
 
-                        # outlet point (prefer snapped outlet if you have it)
-                        # Replace these with your real vars if different:
-                        outlet_pt = Point(lng_snap, lat_snap)  # or Point(pour_lon, pour_lat)
+        # Always keep a HydroRIVERS copy for inspection
+        hr_keep = [c for c in ('geometry','ORD_CLAS','ORD_STRA','LENGTH_KM','HYRIV_ID') if c in hr_clip.columns]
+        if hr_keep:
+            hr_clip[hr_keep].to_file(outfile, layer="streams_hr", driver="GPKG")
+        else:
+            hr_clip.to_file(outfile, layer="streams_hr", driver="GPKG")
 
-                        # find terminal segment by nearest distance
-                        terminal_comid = gfull.geometry.distance(outlet_pt).idxmin()
+        # Decide whether MERIT is “good enough”; otherwise fall back to HydroRIVERS
+        merit_ok = True
+        if myrivers_gdf.empty or myrivers_gdf.geometry.is_empty.all():
+            merit_ok = False
+        else:
+            # optional: require at least N features or total length
+            try:
+                # prefer 'lengthkm' if present
+                total_len = float(myrivers_gdf.get('lengthkm', myrivers_gdf.geometry.length).sum())
+                merit_ok = (len(myrivers_gdf) >= 5) and (total_len > 1.0)
+            except Exception:
+                merit_ok = len(myrivers_gdf) >= 5
 
-                        # walk upstream choosing the "best" branch by (order, uparea, lengthkm)
-                        def _best_up(cur):
-                            ups = []
-                            for c in ("up1", "up2", "up3", "up4"):
-                                if c in gfull.columns:
-                                    val = gfull.at[cur, c]
-                                    if isinstance(val, (int, np.integer)) and val and val in gfull.index:
-                                        ups.append(val)
-                            if not ups:
-                                return None
-                            def key(u):
-                                return (
-                                    gfull.at[u, "order"]   if "order"   in gfull.columns else 0,
-                                    gfull.at[u, "uparea"]  if "uparea"  in gfull.columns else 0.0,
-                                    gfull.at[u, "lengthkm"]if "lengthkm"in gfull.columns else 0.0,
-                                )
-                            return max(ups, key=key)
+        if not merit_ok:
+            # --- HydroRIVERS fallback to the main 'streams' layer ---
+            hr_out = hr_clip[hr_keep] if hr_keep else hr_clip.copy()
+            hr_out.to_file(outfile, layer="streams", driver="GPKG")
 
-                        main_ids = [terminal_comid]
-                        seen = {terminal_comid}
-                        cur = terminal_comid
-                        while True:
-                            nxt = _best_up(cur)
-                            if nxt is None or nxt in seen:
-                                break
-                            main_ids.append(nxt)
-                            seen.add(nxt)
-                            cur = nxt
+            # light-weight "mainstem" by highest Strahler order if available
+            if 'ORD_STRA' in hr_out.columns:
+                maxo = hr_out['ORD_STRA'].max()
+                try:
+                    hr_out[hr_out['ORD_STRA'] == maxo].to_file(outfile, layer="streams_main",  driver="GPKG")
+                    hr_out[hr_out['ORD_STRA']  < maxo].to_file(outfile, layer="streams_tribs", driver="GPKG")
+                except Exception as e:
+                    print(f"⚠️ Could not split HydroRIVERS main/tribs: {e}")
+        else:
+            # --- Use MERIT rivers as usual (and DO NOT overwrite HydroRIVERS later) ---
+            keep = [c for c in ("geometry","order","lengthkm","uparea","COMID") if c in myrivers_gdf.columns]
+            myrivers_gdf = myrivers_gdf[keep].copy()
 
-                        myrivers_gdf["is_main"] = myrivers_gdf.index.isin(main_ids)
+            # tag a mainstem using MERIT's upstream pointers if available
+            try:
+                gfull = rivers_gdf.copy()
+                if "COMID" in gfull.columns and gfull.index.name != "COMID":
+                    gfull = gfull.set_index("COMID", drop=False)
+                if "COMID" in myrivers_gdf.columns and myrivers_gdf.index.name != "COMID":
+                    myrivers_gdf = myrivers_gdf.set_index("COMID", drop=False)
 
-                    except Exception as e:
-                        print(f"⚠️ Could not tag mainstem: {e}")
-                        myrivers_gdf["is_main"] = False
+                outlet_pt = Point(lng_snap, lat_snap)
+                terminal_comid = gfull.geometry.distance(outlet_pt).idxmin()
 
-                    # ---------- write layers ----------
-                    outfile = f"{OUTPUT_DIR}/{wid}.{OUTPUT_EXT}"
-                    myrivers_gdf.to_file(outfile, layer="streams", driver="GPKG")
-                    try:
-                        myrivers_gdf[ myrivers_gdf["is_main"]].to_file(outfile, layer="streams_main",  driver="GPKG")
-                        myrivers_gdf[~myrivers_gdf["is_main"]].to_file(outfile, layer="streams_tribs", driver="GPKG")
-                    except Exception as e:
-                        print(f"⚠️ Could not write split river layers: {e}")
-            # --------------------------------------------------------------------
+                main_ids = _walk_mainstem_ids(gfull, terminal_comid)  # uses order/uparea/lengthkm if present
+                myrivers_gdf["is_main"] = myrivers_gdf.index.isin(main_ids)
+            except Exception as e:
+                print(f"⚠️ Could not tag MERIT mainstem: {e}")
+                myrivers_gdf["is_main"] = False
+
+            myrivers_gdf.to_file(outfile, layer="streams", driver="GPKG")
+            try:
+                myrivers_gdf[ myrivers_gdf["is_main"]].to_file(outfile, layer="streams_main",  driver="GPKG")
+                myrivers_gdf[~myrivers_gdf["is_main"]].to_file(outfile, layer="streams_tribs", driver="GPKG")
+            except Exception as e:
+                print(f"⚠️ Could not write MERIT split river layers: {e}")
 
 
-            gpd.GeoDataFrame(geometry=[Point(lng ,  lat )], crs='EPSG:4326'
-                            ).to_file(outfile, layer="pour_point",  driver="GPKG")
-            gpd.GeoDataFrame(geometry=[Point(lng_snap, lat_snap)], crs='EPSG:4326'
-                            ).to_file(outfile, layer="snap_point", driver="GPKG")
+
+            if _valid_xy(lng, lat):
+                gpd.GeoDataFrame(geometry=[Point(lng, lat)], crs="EPSG:4326")\
+                .to_file(outfile, layer="pour_point", driver="GPKG")
+            if _valid_xy(lng_snap, lat_snap):
+                gpd.GeoDataFrame(geometry=[Point(lng_snap, lat_snap)], crs="EPSG:4326")\
+                .to_file(outfile, layer="snap_point", driver="GPKG")
             # ------------------------------------------------------------------------
             if bAreas:
                 area_reported = gages_df.loc[wid].area_reported

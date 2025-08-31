@@ -24,12 +24,27 @@ def render():
         st.info("🔍 Delimita una cuenca para ver sus parámetros.")
         return
 
-    params = st.session_state["morpho"]
+    params = st.session_state.get("morpho")
+    if not params:   # covers: key missing, None, empty dict
+        st.info("🔍 Delimita una cuenca para ver sus parámetros (o fueron omitidos por un error numérico).")
+        return
 
-    df = pd.DataFrame({
-        "Parámetro": list(params.keys()),
-        "Valor": list(params.values())
-    })
+    if isinstance(params, dict):
+        df = pd.DataFrame({"Parámetro": list(params.keys()),
+                           "Valor": list(params.values())})
+    elif isinstance(params, pd.DataFrame):
+        df = params.copy()
+    else:
+        st.warning(f"No se reconoce el formato de parámetros: {type(params)}")
+        return
+
+    # Pretty print numbers when posible
+    def _fmt(v):
+        try:
+            return f"{float(v):.3f}"
+        except Exception:
+            return v
+    df["Valor"] = df["Valor"].map(_fmt)
 
     st.subheader("📋 Tabla de parámetros calculados")
     st.dataframe(df.style.format(precision=3), use_container_width=True)

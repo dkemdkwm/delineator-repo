@@ -51,7 +51,7 @@ def render():
         return
 
     try:
-        gdf = gpd.read_file(gpkg_path)
+        gdf = gpd.read_file(gpkg_path, layer="watershed")
     except Exception as e:
         st.error(f"No se pudo leer la cuenca: {e}")
         return
@@ -80,11 +80,13 @@ def render():
         if dem_path:
             st.session_state["dem_path"] = dem_path
 
-    # if not dem_path:
-    #     st.error("❌ No se encontró un DEM que cubra la cuenca (ver debug).")
-    #     return
-    # else:
-    #     st.success(f"✅ DEM usado: `{os.path.basename(dem_path)}`")
+    if not dem_path:
+        st.error("❌ No se encontró un DEM que cubra la cuenca. Verifica las carpetas de búsqueda o habilita debug.")
+        # Optional quick help:
+        st.caption("Carpetas buscadas: " + ", ".join(DEM_SEARCH_FOLDERS))
+        return
+    else:
+        st.success(f"")
 
     # ---------------- Parámetros UI ----------------
     esquema = "arcgis (100 m)"

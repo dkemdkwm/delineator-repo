@@ -3,6 +3,37 @@ import io, zipfile, math, base64
 import pandas as pd
 import geopandas as gpd
 from typing import List, Optional, Tuple
+import json
+from shapely.geometry import shape
+
+def _gdf_from_geojson_like(obj):
+    """Accepts a GeoJSON string/dict and returns a GeoDataFrame (EPSG:4326)."""
+    if obj is None:
+        return None
+    if isinstance(obj, gpd.GeoDataFrame):
+        return obj
+    if isinstance(obj, str):
+        obj = json.loads(obj)
+    t = obj.get("type")
+    feats = []
+    if t == "FeatureCollection":
+        feats = [f for f in obj.get("features", []) if f.get("geometry")]
+    elif t == "Feature":
+        feats = [obj]
+    else:  # raw geometry dict
+        feats = [{"type": "Feature", "properties": {}, "geometry": obj}]
+    geoms = []
+    props = []
+    for f in feats:
+        geom = f.get("geometry")
+        if geom:
+            geoms.append(shape(geom))
+            props.append(f.get("properties", {}))
+    if not geoms:
+        return None
+    gdf = gpd.GeoDataFrame(props, geometry=geoms, crs="EPSG:4326")
+    return gdf
+
 
 # ==========================================================
 # Selección dinámica de engine Excel
@@ -370,7 +401,11 @@ def build_excel_bytes(
 # ==========================================================
 # Shapefile ZIP
 # ==========================================================
-def build_watershed_shapefile_zip(gpkg_path: str, layers: Optional[List[str]] = None) -> bytes:
+def build_watershed_shapefile_zip(
+    gpkg_path: str,
+    layers: Optional[List[str]] = None,
+    extra_layers: Optional[dict] = None  # NEW: {"layer_name": (GeoDataFrame | GeoJSON str/dict)}
+) -> bytes:
     import tempfile
     if not gpkg_path or not Path(gpkg_path).exists():
         raise FileNotFoundError("GeoPackage no encontrado.")
@@ -379,6 +414,8 @@ def build_watershed_shapefile_zip(gpkg_path: str, layers: Optional[List[str]] = 
     with zipfile.ZipFile(mem_zip, "w", zipfile.ZIP_DEFLATED) as zf:
 
         def _write_one(gdf: gpd.GeoDataFrame, base: str, tmpdir: Path):
+            if gdf is None or gdf.empty:
+                return
             shp = tmpdir / f"{base}.shp"
             gdf.to_file(shp)
             for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
@@ -388,6 +425,7 @@ def build_watershed_shapefile_zip(gpkg_path: str, layers: Optional[List[str]] = 
 
         with tempfile.TemporaryDirectory() as td:
             tdp = Path(td)
+            # GPKG layers
             if layers:
                 for lyr in layers:
                     try:
@@ -399,8 +437,19 @@ def build_watershed_shapefile_zip(gpkg_path: str, layers: Optional[List[str]] = 
                 gdf = gpd.read_file(gpkg_path)
                 _write_one(gdf, "watershed", tdp)
 
+            # EXTRA layers (GeoDataFrame or GeoJSON)
+            if extra_layers:
+                for name, payload in extra_layers.items():
+                    try:
+                        gdf = _gdf_from_geojson_like(payload)
+                        if gdf is not None:
+                            _write_one(gdf, name, tdp)
+                    except Exception:
+                        pass
+
     mem_zip.seek(0)
     return mem_zip.getvalue()
+
 
 # ==========================================================
 # DEM (descarga directa o empaquetado FLT+HDR)

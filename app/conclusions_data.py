@@ -67,8 +67,7 @@ def render():
     if estaciones:
         for est in estaciones:
             nombre = get_value_any_case(est, "NOMBRE", "Nombre", "nombre")
-            clase = get_value_any_case(est, "CLASE", "Clase", "clase", "TIPO", "Tipo", "tipo")
-            st.markdown(f"- {nombre} ({clase})")
+            st.markdown(f"- {nombre}")
     else:
         st.info("No se encontraron estaciones cercanas registradas por el IDEAM.")
 

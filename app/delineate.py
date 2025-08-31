@@ -4,11 +4,36 @@ import folium
 from folium import TileLayer, Tooltip
 from geopandas import gpd
 import pandas as pd
-from shapely.geometry import Point
 from folium import CustomIcon
 import json
 from shapely.geometry import shape
 from shapely.ops import unary_union
+from shapely.geometry import Point, LineString
+from shapely.ops import nearest_points
+
+def _stream_style_for_row(row):
+    is_main = bool(row.get("is_main"))
+    color = "#0077b6" if is_main else "#00b4d8"
+    weight = 4 if is_main else 2
+    return color, weight
+
+def _gdf_from_geojson_str(geojson_str: str) -> gpd.GeoDataFrame:
+    feat = json.loads(geojson_str)
+    crs = "EPSG:4326"
+    return gpd.GeoDataFrame.from_features(feat["features"], crs=crs)
+
+def _nearest_stream_row(point: Point, lines_gdf: gpd.GeoDataFrame):
+    idx = lines_gdf.distance(point).idxmin()
+    return lines_gdf.loc[idx]
+
+def _connector_to_line(point: Point, line_geom) -> LineString | None:
+    if point.is_empty or line_geom is None or line_geom.is_empty:
+        return None
+    p_on = line_geom.interpolate(line_geom.project(point))
+    if p_on.is_empty:
+        return None
+    return LineString([point, p_on])
+
 
 def _as_ws_geom(geojson_any):
     """Return a valid unary union of watershed geometry (Polygon/MultiPolygon) from any GeoJSON form."""
@@ -203,56 +228,57 @@ def render():
         #     bounds = gdf_cne.total_bounds
         #     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
         # ── Filter CNE by watershed with tolerance (proximity to basin) ──────────────
-        if st.session_state.get("geojson"):
-            try:
-                ws_union = _as_ws_geom(st.session_state["geojson"])
-                if not ws_union or ws_union.is_empty:
-                    st.warning("⚠️ GeoJSON de cuenca inválido o vacío.")
-                else:
-                    # === TOLERANCE (km) → degrees ===
-                    buffer_km = 5  # 🔧 change this to taste (e.g., 0.2–2.0 km)
-                    deg_tol = buffer_km / 111.0  # ~111 km per degree latitude
-
-                    # Buffer OUTWARD so “nearby” stations are included (like click buffer)
-                    ws_buffered = ws_union.buffer(deg_tol)
-
-                    # Quick bbox prefilter for speed
-                    minx, miny, maxx, maxy = ws_buffered.bounds
-                    cne_bbox = gdf_cne[
-                        (gdf_cne.geometry.x >= minx) & (gdf_cne.geometry.x <= maxx) &
-                        (gdf_cne.geometry.y >= miny) & (gdf_cne.geometry.y <= maxy)
-                    ].copy()
-
-                    # Proximity predicate: intersects buffered basin
-                    gdf_filtered = cne_bbox[cne_bbox.geometry.intersects(ws_buffered)]
-
-                    icon_url = "app/cloudSunIcon.png"
-                    if not gdf_filtered.empty:
-                        st.session_state["estaciones_filtradas"] = gdf_filtered.to_dict("records")
-
-                        # Optional: group layer
-                        fg_ws = folium.FeatureGroup(
-                            name=f"CNE IDEAM (dentro o a ≤{buffer_km} km de la cuenca)",
-                            show=True
-                        )
-
-                        for _, row in gdf_filtered.iterrows():
-                            p = row.geometry
-                            nombre = str(row.get("NOMBRE") or row.get("Nombre") or row.get("nombre") or "").strip()
-                            codigo = str(row.get("CODIGO") or row.get("Codigo") or row.get("codigo") or "").strip()
-                            tooltip_html = f"<b>NOMBRE:</b> {nombre}<br><b>CODIGO:</b> {codigo}"
-
-                            folium.Marker(
-                                location=[p.y, p.x],
-                                icon=CustomIcon(icon_image=icon_url, icon_size=(60, 60), icon_anchor=(20, 20)),
-                                tooltip=Tooltip(tooltip_html)
-                            ).add_to(fg_ws)
-
-                        fg_ws.add_to(m)
+        if st.session_state.get("show_cne", True):
+            if st.session_state.get("geojson"):
+                try:
+                    ws_union = _as_ws_geom(st.session_state["geojson"])
+                    if not ws_union or ws_union.is_empty:
+                        st.warning("⚠️ GeoJSON de cuenca inválido o vacío.")
                     else:
-                        st.warning(f"⚠️ No se encontraron entidades CNE_IDEAM a ≤{buffer_km} km de la cuenca.")
-            except Exception as e:
-                st.warning(f"⚠️ No se pudo procesar estaciones respecto a la cuenca: {e}")
+                        # === TOLERANCE (km) → degrees ===
+                        buffer_km = 5  # 🔧 change this to taste (e.g., 0.2–2.0 km)
+                        deg_tol = buffer_km / 111.0  # ~111 km per degree latitude
+
+                        # Buffer OUTWARD so “nearby” stations are included (like click buffer)
+                        ws_buffered = ws_union.buffer(deg_tol)
+
+                        # Quick bbox prefilter for speed
+                        minx, miny, maxx, maxy = ws_buffered.bounds
+                        cne_bbox = gdf_cne[
+                            (gdf_cne.geometry.x >= minx) & (gdf_cne.geometry.x <= maxx) &
+                            (gdf_cne.geometry.y >= miny) & (gdf_cne.geometry.y <= maxy)
+                        ].copy()
+
+                        # Proximity predicate: intersects buffered basin
+                        gdf_filtered = cne_bbox[cne_bbox.geometry.intersects(ws_buffered)]
+
+                        icon_url = "app/cloudSunIcon.png"
+                        if not gdf_filtered.empty:
+                            st.session_state["estaciones_filtradas"] = gdf_filtered.to_dict("records")
+
+                            # Optional: group layer
+                            fg_ws = folium.FeatureGroup(
+                                name=f"CNE IDEAM (dentro o a ≤{buffer_km} km de la cuenca)",
+                                show=True
+                            )
+
+                            for _, row in gdf_filtered.iterrows():
+                                p = row.geometry
+                                nombre = str(row.get("NOMBRE") or row.get("Nombre") or row.get("nombre") or "").strip()
+                                codigo = str(row.get("CODIGO") or row.get("Codigo") or row.get("codigo") or "").strip()
+                                tooltip_html = f"<b>NOMBRE:</b> {nombre}<br><b>CODIGO:</b> {codigo}"
+
+                                folium.Marker(
+                                    location=[p.y, p.x],
+                                    icon=CustomIcon(icon_image=icon_url, icon_size=(60, 60), icon_anchor=(20, 20)),
+                                    tooltip=Tooltip(tooltip_html)
+                                ).add_to(fg_ws)
+
+                            fg_ws.add_to(m)
+                        else:
+                            st.warning(f"⚠️ No se encontraron entidades CNE_IDEAM a ≤{buffer_km} km de la cuenca.")
+                except Exception as e:
+                    st.warning(f"⚠️ No se pudo procesar estaciones respecto a la cuenca: {e}")
     except Exception as e:
         st.warning(f"⚠️ No se pudo procesar el shapefile CNE_IDEAM: {e}")
 
@@ -279,34 +305,85 @@ def render():
             tooltip="Ríos"
         ).add_to(m)
 
-    if st.session_state.get("show_requested_pt") and "requested_point" in st.session_state:
-        folium.GeoJson(
-            st.session_state["requested_point"],
-            name="Punto solicitado",
-            marker=folium.CircleMarker(radius=6, color="lightgreen", fill=True, fill_opacity=1),
-            tooltip="Punto de solicitud"
-        ).add_to(m)
+        streams_gdf = None
+        for candidate in ("streams_hr", "streams", "streams_main"):
+            if st.session_state.get(candidate):
+                streams_gdf = _gdf_from_geojson_str(st.session_state[candidate])
+                if not streams_gdf.empty:
+                    break
 
+        if st.session_state.get("show_requested_pt") and "requested_point" in st.session_state:
+            pt_req = _first_point_lonlat(st.session_state["requested_point"])
+            if pt_req and streams_gdf is not None:
+                lon_r, lat_r = pt_req
+                req_pt = Point(lon_r, lat_r)
+
+                # If snapped exists, draw requested → snapped with stream style of the nearest segment to snapped
+                snapped_xy = _first_point_lonlat(st.session_state.get("snap_point"))
+                if snapped_xy:
+                    lon_s, lat_s = snapped_xy
+                    snap_pt = Point(lon_s, lat_s)
+                    nearest_row = _nearest_stream_row(snap_pt, streams_gdf)
+                    color, weight = _stream_style_for_row(nearest_row)
+                    folium.PolyLine([(lat_r, lon_r), (lat_s, lon_s)], weight=weight, opacity=0.95, color=color).add_to(m)
+
+                # requested → river
+                if streams_gdf is not None:
+                    nearest_row = _nearest_stream_row(req_pt, streams_gdf)
+                    conn = _connector_to_line(req_pt, nearest_row.geometry)
+                    if conn and conn.length > 0:
+                        color, weight = _stream_style_for_row(nearest_row)
+                        folium.PolyLine([(y, x) for x, y in conn.coords], weight=weight, opacity=0.95, color=color).add_to(m)
+
+        # SNAPPED/POUR point (magenta) → river
         if st.session_state.get("show_snapped_pt") and "snap_point" in st.session_state:
-            pt = _first_point_lonlat(st.session_state["snap_point"])
-            if pt:
-                lon, lat = pt
-                folium.Marker(
-                    location=[lat, lon],
-                    tooltip="Punto de desfogue (ajustado)",
-                    icon=folium.Icon(color="purple", icon="tint", prefix="fa")
-                ).add_to(m)
+            pt_snap = _first_point_lonlat(st.session_state["snap_point"])
+            if pt_snap and streams_gdf is not None:
+                lon_s, lat_s = pt_snap
+                snap_pt = Point(lon_s, lat_s)
 
-                folium.CircleMarker(
-                    location=[lat, lon],
-                    radius=6,
-                    color="magenta",
-                    fill=True,
-                    fill_opacity=1
-                ).add_to(m)
+                # marker + circle (you already have these)
+                folium.Marker(location=[lat_s, lon_s],
+                            tooltip="Punto de desfogue (ajustado)",
+                            icon=folium.Icon(color="purple", icon="tint", prefix="fa")).add_to(m)
+                folium.CircleMarker(location=[lat_s, lon_s], radius=6, color="magenta", fill=True, fill_opacity=1).add_to(m)
 
-            else:
-                st.warning("⚠️ No se pudo leer el punto ajustado (GeoJSON inválido).")
+                # snapped → river (only if slight gap)
+                nearest_row = _nearest_stream_row(snap_pt, streams_gdf)
+                conn = _connector_to_line(snap_pt, nearest_row.geometry)
+                if conn and conn.length > 0:
+                    color, weight = _stream_style_for_row(nearest_row)
+                    folium.PolyLine([(y, x) for x, y in conn.coords], weight=weight, opacity=0.95, color=color).add_to(m)
+
+
+    # if st.session_state.get("show_requested_pt") and "requested_point" in st.session_state:
+    #     folium.GeoJson(
+    #         st.session_state["requested_point"],
+    #         name="Punto solicitado",
+    #         marker=folium.CircleMarker(radius=6, color="lightgreen", fill=True, fill_opacity=1),
+    #         tooltip="Punto de solicitud"
+    #     ).add_to(m)
+
+    #     if st.session_state.get("show_snapped_pt") and "snap_point" in st.session_state:
+    #         pt = _first_point_lonlat(st.session_state["snap_point"])
+    #         if pt:
+    #             lon, lat = pt
+    #             folium.Marker(
+    #                 location=[lat, lon],
+    #                 tooltip="Punto de desfogue (ajustado)",
+    #                 icon=folium.Icon(color="purple", icon="tint", prefix="fa")
+    #             ).add_to(m)
+
+    #             folium.CircleMarker(
+    #                 location=[lat, lon],
+    #                 radius=6,
+    #                 color="magenta",
+    #                 fill=True,
+    #                 fill_opacity=1
+    #             ).add_to(m)
+
+    #         else:
+    #             st.warning("⚠️ No se pudo leer el punto ajustado (GeoJSON inválido).")
 
 
     if "map_bounds" in st.session_state:

@@ -67,7 +67,9 @@ OUTPUT_CSV = True
 # can save time in the future by storing the GeoDataFrame as a .pkl file.
 # Enter a blank string, '' if you do NOT want the script to create .pkl files.
 # Please note that these files can be large! (Up to around 1 GB for large basins.)
-PICKLE_DIR = 'pkl'
+PICKLE_DIR = ''
+# PICKLE_DIR = 'pkl'
+
 
 PLOTS_DIR = "plots"
 
@@ -129,3 +131,6 @@ MAX_DIST = 0.075
 # outlet is not getting snapped to a river centerline properly
 THRESHOLD_SINGLE = 500
 THRESHOLD_MULTIPLE = 5000
+
+USE_HYDRO_RIVERS_FOR_MAP = True
+HYDRORIVERS_SHP = "data/Hidrología/Drenaje_Sencillo.shp"
