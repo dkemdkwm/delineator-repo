@@ -67,10 +67,28 @@ def render():
         "Kirpich": kirpich,
         "Temez": temez
     }])
+    
     st.session_state["tc_results"] = results
     st.subheader("Resultados de Tiempo de Concentración (horas)")
-    st.dataframe(results.style.format("{:.2f}"))
 
+    # --- build a styles DF matching the visible table shape ---
+    visible = results.reset_index(drop=True)  # removes the numeric index column
+    styles = pd.DataFrame("", index=visible.index, columns=visible.columns)
+
+    styled = (
+        visible
+        .style
+        .format("{:.2f}")
+        .apply(lambda _: styles, axis=None)       # apply prebuilt (empty) cell styles
+        .hide(axis="index")                       # ask pandas to hide index
+        .set_table_styles([                       # ...and force-hide via CSS
+            {"selector": "th.row_heading", "props": "display:none;"},
+            {"selector": "th.blank",       "props": "display:none;"},
+            {"selector": "tbody th",       "props": "display:none;"},
+        ])
+    )
+
+    st.table(styled)
     if warnings:
         st.info("⚠️ " + " | ".join(warnings))
 

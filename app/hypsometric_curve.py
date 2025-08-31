@@ -185,7 +185,7 @@ def render():
     st.info(f"Índice Hipsométrico (HI) = **{hi:.3f}**")
 
     cols_order = [
-        "N° Clase", "Límite Inferior (m)", "Límite Superior (m)",
+        "Límite Inferior (m)", "Límite Superior (m)",
         "Altura Media de Clase (m)",
         "Área (m²)", "Área (km²)",
         "Área Acumulada (km²)",
@@ -196,16 +196,36 @@ def render():
     tabla_mostrar = tabla_para_mostrar[cols_unique]
 
     st.subheader("Tabla hipsométrica")
-    st.dataframe(
-        tabla_mostrar.style.format({
-            "Altura Media de Clase (m)": "{:.1f}",
-            "Área (m²)": "{:,.0f}",
-            "Área (km²)": "{:.2f}",
-            "Área Acumulada (km²)": "{:.2f}",
-            "Área Acumulada (%)": "{:.2f}",
-            "Área % de cada clase": "{:.2f}"
-        })
+
+    # Build the visible table (no numeric index)
+    visible = tabla_mostrar.reset_index(drop=True)
+
+    # Empty styles DF that matches the visible table (lets us force-hide row headings)
+    styles = pd.DataFrame("", index=visible.index, columns=visible.columns)
+
+    fmt = {
+        "Altura Media de Clase (m)": "{:.1f}",
+        "Área (m²)": "{:,.0f}",
+        "Área (km²)": "{:.2f}",
+        "Área Acumulada (km²)": "{:.2f}",
+        "Área Acumulada (%)": "{:.2f}",
+        "Área % de cada clase": "{:.2f}",
+    }
+
+    styled = (
+        visible
+        .style
+        .format(fmt)
+        .apply(lambda _: styles, axis=None)       # apply prebuilt (empty) styles
+        .hide(axis="index")                       # hide index
+        .set_table_styles([                       # belt-and-suspenders hide
+            {"selector": "th.row_heading", "props": "display:none;"},
+            {"selector": "th.blank",       "props": "display:none;"},
+            {"selector": "tbody th",       "props": "display:none;"},
+        ])
     )
+
+    st.table(styled)
 
     st.download_button(
         "⬇️ Descargar tabla (CSV)",
