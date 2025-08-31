@@ -134,3 +134,12 @@ THRESHOLD_MULTIPLE = 5000
 
 USE_HYDRO_RIVERS_FOR_MAP = True
 HYDRORIVERS_SHP = "data/Hidrología/Drenaje_Sencillo.shp"
+
+LOCAL_RIVERS_SHP = "data/Hidrología/Drenaje_Sencillo.shp"
+
+# Flag to use local rivers instead of MERIT Hydro
+USE_LOCAL_RIVERS = True
+
+# (Optional) If using the local network on the map as well:
+USE_HYDRO_RIVERS_FOR_MAP = True  # can reuse this for map overlays
+HYDRORIVERS_SHP = LOCAL_RIVERS_SHP

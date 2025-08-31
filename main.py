@@ -219,7 +219,7 @@ with st.sidebar:
                 "Cuenca", value=st.session_state.show_watershed, key="cb_cuenca"
             )
             st.session_state.show_streams = st.checkbox(
-                "Ríos", value=st.session_state.show_streams, key="cb_rios"
+                "Drenajes", value=st.session_state.show_streams, key="cb_rios"
             )
             st.session_state.show_requested_pt = st.checkbox(
                 "Punto solicitado", value=st.session_state.show_requested_pt, key="cb_pt_req"

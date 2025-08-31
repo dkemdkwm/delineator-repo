@@ -404,11 +404,22 @@ def build_excel_bytes(
 def build_watershed_shapefile_zip(
     gpkg_path: str,
     layers: Optional[List[str]] = None,
-    extra_layers: Optional[dict] = None  # NEW: {"layer_name": (GeoDataFrame | GeoJSON str/dict)}
+    extra_layers: Optional[dict] = None  # {"layer_name": (GDF | GeoJSON str/dict)}
 ) -> bytes:
     import tempfile
     if not gpkg_path or not Path(gpkg_path).exists():
         raise FileNotFoundError("GeoPackage no encontrado.")
+
+    translate_map = {
+        "watershed": "cuenca",
+        "streams": "drenajes",
+        "streams_main": "cauce_principal",
+        "streams_tribs": "afluentes",
+        "pour_point": "punto_solicitado",
+        "snap_point": "punto_ajustado",
+        "streams_hr": "drenajes_alta_res",
+        "cne_stations": "estaciones_cne",
+    }
 
     mem_zip = io.BytesIO()
     with zipfile.ZipFile(mem_zip, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -417,7 +428,8 @@ def build_watershed_shapefile_zip(
             if gdf is None or gdf.empty:
                 return
             shp = tmpdir / f"{base}.shp"
-            gdf.to_file(shp)
+            # Write shapefile with UTF-8 to ensure Spanish accents are preserved
+            gdf.to_file(shp, encoding="utf-8")
             for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
                 fe = shp.with_suffix(ext)
                 if fe.exists():
@@ -425,25 +437,33 @@ def build_watershed_shapefile_zip(
 
         with tempfile.TemporaryDirectory() as td:
             tdp = Path(td)
-            # GPKG layers
+
+            # 1) GPKG layers → use Spanish name if available
             if layers:
                 for lyr in layers:
                     try:
                         gdf = gpd.read_file(gpkg_path, layer=lyr)
-                        _write_one(gdf, lyr, tdp)
+                        base_name = translate_map.get(lyr, lyr)
+                        _write_one(gdf, base_name, tdp)
                     except Exception:
                         pass
             else:
-                gdf = gpd.read_file(gpkg_path)
-                _write_one(gdf, "watershed", tdp)
+                # Fallback single layer export (rename to "cuenca" if possible)
+                try:
+                    gdf = gpd.read_file(gpkg_path)
+                    base_name = translate_map.get("watershed", "watershed")
+                    _write_one(gdf, base_name, tdp)
+                except Exception:
+                    pass
 
-            # EXTRA layers (GeoDataFrame or GeoJSON)
+            # 2) Extra layers (GeoDataFrame or GeoJSON-like) → Spanish names
             if extra_layers:
                 for name, payload in extra_layers.items():
                     try:
-                        gdf = _gdf_from_geojson_like(payload)
+                        gdf = _gdf_from_geojson_like(payload)  # helper already in this file
                         if gdf is not None:
-                            _write_one(gdf, name, tdp)
+                            base_name = translate_map.get(name, name)
+                            _write_one(gdf, base_name, tdp)
                     except Exception:
                         pass
 
