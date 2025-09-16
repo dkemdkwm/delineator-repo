@@ -199,7 +199,8 @@ with st.sidebar:
                             pass
                         if lat_s is not None and lon_s is not None:
                             st.write(f"🟣 Ajustado:   lat={lat_s:.6f}, lon={lon_s:.6f}")
-
+                            st.session_state["snap_lat"] = float(lat_s)
+                            st.session_state["snap_lon"] = float(lon_s)
                 except Exception as e:
                     st.error(f"⚠️ Error cargando GPKG: {e}")
         else:

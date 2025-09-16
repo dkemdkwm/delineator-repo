@@ -79,6 +79,7 @@ def render():
             "Densidad de drenajes (km/km²)",
             "Clasificación de densidad",
             "Número de drenajes",
+            "Densidad de corrientes"
         ],
         "Altura": [
             "Cota mínima (msnm)",
@@ -149,7 +150,7 @@ def render():
         "densidad_de_drenajes_km_km2": "Densidad de drenajes (km/km²)",
         "densidad_de_drenajes": "Densidad de drenajes (km/km²)",
         "densidad_drenajes": "Densidad de drenajes (km/km²)",
-        "densi_corrientes": "Densidad de drenajes (km/km²)",  # alias legacy
+        "densidad_de_corrientes": "Densidad de corrientes",
 
         "clasificacion_de_densidad": "Clasificación de densidad",
         "clasificacion_densidad": "Clasificación de densidad",

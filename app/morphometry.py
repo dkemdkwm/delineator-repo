@@ -333,6 +333,9 @@ def compute(
     )
     num_dren = len(streams_gdf) if streams_gdf is not None else np.nan
 
+    densidad_corr = (
+        (num_dren / area) if (streams_gdf is not None and area and area > 0) else np.nan
+    )
     # --- Average slope using ΔH / L (like hypsometric tool) ---
     if np.isnan(delta_h):
         avg_slope_pct = avg_slope_deg = np.nan
@@ -379,6 +382,7 @@ def compute(
         "Clasificación de sinuosidad": _classify_sinuosity(sinuosidad) if not np.isnan(sinuosidad) else np.nan,
         "Longitud total de cauces (km)": round(streams_gdf.geometry.length.sum() / 1_000, 3) if streams_gdf is not None else np.nan,
         "Densidad de drenajes (km/km²)": round(densidad_dren, 3) if not np.isnan(densidad_dren) else np.nan,
+        "Densidad de corrientes": round(densidad_corr, 3) if not np.isnan(densidad_corr) else np.nan,
         "Clasificación de densidad": _classify_densidad(densidad_dren) if not np.isnan(densidad_dren) else np.nan,
         "Cota mínima (msnm)": round(cota_min, 2) if not np.isnan(cota_min) else np.nan,
         "Cota máxima (msnm)": round(cota_max, 2) if not np.isnan(cota_max) else np.nan,

@@ -65,7 +65,18 @@ def render():
         "Pilgrim-McDermott": pilgrim_mcdermott,
         "Valencia-Zuluaga": valencia_zuluaga,
         "Kirpich": kirpich,
-        "Temez": temez
+        "Temez": temez,
+        "Promedio": np.mean([
+            giandotti,
+            bransby_williams,
+            california,
+            clark,
+            passini,
+            pilgrim_mcdermott,
+            valencia_zuluaga,
+            kirpich,
+            temez
+        ])
     }])
     
     st.session_state["tc_results"] = results

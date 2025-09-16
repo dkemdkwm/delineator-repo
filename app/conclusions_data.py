@@ -10,7 +10,21 @@ def render():
     morpho = st.session_state.get("morpho", {})
     lat = st.session_state.get("lat", "—")
     lon = st.session_state.get("lon", "—")
+    def _fmt_coord(x):
+        try:
+            return f"{float(x):.6f}"
+        except Exception:
+            return "—"
 
+    snap_lat = st.session_state.get("snap_lat", None)
+    snap_lon = st.session_state.get("snap_lon", None)
+
+    # Fallback si aún no hay punto ajustado:
+    base_lat = st.session_state.get("lat", "—")
+    base_lon = st.session_state.get("lon", "—")
+
+    display_lat = _fmt_coord(snap_lat) if snap_lat is not None else _fmt_coord(base_lat)
+    display_lon = _fmt_coord(snap_lon) if snap_lon is not None else _fmt_coord(base_lon)
     # Intentar determinar municipios desde cuenca y shapefile
     municipios = "—"
     try:
@@ -47,7 +61,7 @@ def render():
     estaciones = st.session_state.get("estaciones_filtradas", [])
 
     st.markdown(f"""
-    Esta cuenca se delimitó a partir del punto de desfogue ingresado en las coordenadas **Latitud: {lat}**, **Longitud: {lon}** bajo el sistema de referencia espacial WGS 84.
+    Esta cuenca se delimitó a partir del punto de desfogue ajustado en las coordenadas **Latitud: {display_lat}**, **Longitud: {display_lon}** bajo el sistema de referencia espacial WGS 84.
 
     La cuenca abarca los municipios de **{municipios}**, tiene un área total de aproximadamente **{area} km²**, lo que permite clasificarla según su tamaño como una cuenca **{clasif.lower()}**.
 
