@@ -75,10 +75,10 @@ Los resultados pueden exportarse en:
 
 ---
 
-## 👥 Autores y responsables
-- **Elaboró:** Laura Rodriguez – Ingeniera Ambiental  
-- **Responsable:** Coordinador de Hidrología de Seruans  
-
+## 👥 Autores 
+- **Elaboró:** Laura Rodriguez – Ingeniera Ambiental
+- Harold Fique - ingeniero de sistemas
+- karel Sanchez - Director de proyecto
 ---
 
 
